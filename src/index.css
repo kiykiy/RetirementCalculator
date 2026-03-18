@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased;
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .input-field {
+    @apply w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm
+           focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  }
+  .label {
+    @apply block text-xs font-medium text-slate-600 mb-1;
+  }
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 mt-4 first:mt-0;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-4;
+  }
+  .metric-card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col gap-1;
+  }
+  .btn-primary {
+    @apply bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg
+           transition-colors duration-150 disabled:opacity-50;
+  }
+  .no-spinner::-webkit-inner-spin-button,
+  .no-spinner::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .no-spinner { -moz-appearance: textfield; }
+
+  .strategy-tab {
+    @apply px-2.5 py-1 text-xs font-medium rounded-md cursor-pointer transition-colors duration-150
+           border border-transparent;
+  }
+  .strategy-tab.active {
+    @apply bg-brand-600 text-white border-brand-600;
+  }
+  .strategy-tab:not(.active) {
+    @apply text-slate-600 hover:bg-slate-100 border-slate-200;
+  }
+}
