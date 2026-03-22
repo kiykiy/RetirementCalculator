@@ -52,7 +52,13 @@
       "Bash(node fix_app.js)",
       "Bash(grep -l \"rotate\\\\|landscape\\\\|tooltip\\\\|Tooltip\\\\|one.time\\\\|oneTime\\\\|onetime\" src/components/*.jsx src/App.jsx)",
       "Bash(npm run:*)",
-      "Bash(grep -l \"Retirement\\\\|Detailed\" \"C:\\\\Users\\\\kixka\\\\OneDrive\\\\Desktop\\\\RR Project\\\\RetirementCalculator 2026.03.18\\\\src\\\\components\"/*.jsx)"
+      "Bash(grep -l \"Retirement\\\\|Detailed\" \"C:\\\\Users\\\\kixka\\\\OneDrive\\\\Desktop\\\\RR Project\\\\RetirementCalculator 2026.03.18\\\\src\\\\components\"/*.jsx)",
+      "Bash(where npm:*)",
+      "Bash(node -e \"const {spawn} = require\\(''child_process''\\); const p = spawn\\(''npm.cmd'', [''run'', ''dev''], {cwd: ''C:\\\\\\\\Users\\\\\\\\kixka\\\\\\\\OneDrive\\\\\\\\Desktop\\\\\\\\RR Project\\\\\\\\Vercel-Financial-Planner'', shell: true}\\); p.stdout.on\\(''data'', d => console.log\\(d.toString\\(\\)\\)\\); p.stderr.on\\(''data'', d => console.error\\(d.toString\\(\\)\\)\\); setTimeout\\(\\(\\)=>p.kill\\(\\), 5000\\);\")",
+      "Bash(where node:*)",
+      "Bash(where vite:*)",
+      "Bash(ls \"C:\\\\Users\\\\kixka\\\\OneDrive\\\\Desktop\\\\RR Project\\\\Vercel-Financial-Planner\\\\node_modules\\\\.bin\\\\vite\"*)",
+      "Bash('/c/Program Files/nodejs/node.exe' node_modules/vite/bin/vite.js --port 5173)"
     ]
   }
 }
