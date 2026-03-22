@@ -1,0 +1,9 @@
+{
+  "name": "Canadian Retirement Calculator",
+  "short_name": "Retirement Calc",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1e293b",
+  "theme_color": "#1e293b",
+  "start_url": "/"
+}

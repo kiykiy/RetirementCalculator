@@ -3,12 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Canadian Retirement Calculator</title>
+    <title>Forward Planner</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="manifest" href="/manifest.json" />
+    <!-- Apply dark class before first paint to prevent flash -->
+    <script>
+      try {
+        const s = localStorage.getItem('endgame_simulator_v1')
+        if (s && JSON.parse(s).darkMode) document.documentElement.classList.add('dark')
+      } catch {}
+    </script>
   </head>
   <body>
+    <div id="rotate-overlay" aria-hidden="true">
+      <div id="rotate-overlay-inner">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="2" width="10" height="14" rx="2"/>
+          <path d="M2 17l3 3 3-3"/>
+          <path d="M5 20V14"/>
+        </svg>
+        <p class="rotate-title">Rotate your device</p>
+        <p class="rotate-sub">This calculator works best in landscape mode</p>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

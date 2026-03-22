@@ -1,4 +1,7 @@
-import { useState, useMemo, useCallback } from 'react'
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { supabase } from './lib/supabase.js'
+import AuthModal          from './components/AuthModal.jsx'
+import BudgetApp          from './components/BudgetApp.jsx'
 import InputPanel         from './components/InputPanel.jsx'
 import StrategySelector   from './components/StrategySelector.jsx'
 import RrspDrawdown       from './components/RrspDrawdown.jsx'
@@ -6,45 +9,74 @@ import ResultsSummary     from './components/ResultsSummary.jsx'
 import AccumulationChart  from './components/AccumulationChart.jsx'
 import AccumulationTable  from './components/AccumulationTable.jsx'
 import BalanceChart       from './components/BalanceChart.jsx'
-import CashflowChart      from './components/CashflowChart.jsx'
+import WithdrawalRateChart from './components/WithdrawalRateChart.jsx'
+import IncomeFloorChart    from './components/IncomeFloorChart.jsx'
+import CashflowChart          from './components/CashflowChart.jsx'
+import WithdrawalSourceChart  from './components/AccountDepletionChart.jsx'
+import TaxBracketHeatmap     from './components/TaxBracketHeatmap.jsx'
 import DetailTable        from './components/DetailTable.jsx'
-import { runSimulation, buildAccumulationRows } from './lib/simulate.js'
+import WhatIfPanel        from './components/WhatIfPanel.jsx'
+import SequencingAdvisor  from './components/SequencingAdvisor.jsx'
+import EstateTab          from './components/EstateTab.jsx'
+import IncomeTargetPanel  from './components/IncomeTargetPanel.jsx'
+import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
+import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
+import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
 
 const DEFAULT_INPUTS = {
-  // Profile
+  userName:       '',
+  spouseName:     '',
   currentAge:     45,
   retirementAge:  65,
   lifeExpectancy: 90,
   province:       'ON',
-  // Accounts
   accounts: [
     { id: 'rrif',   name: 'RRSP / RRIF',    balance: 250000, annualContribution: 10500, returnRate: 7,   taxType: 'rrif'   },
     { id: 'tfsa',   name: 'TFSA',           balance: 80000,  annualContribution: 7000,  returnRate: 7,   taxType: 'tfsa'   },
     { id: 'nonreg', name: 'Non-Registered', balance: 50000,  annualContribution: 0,     returnRate: 6.5, taxType: 'nonreg' },
   ],
-  // Retirement
   inflation: 2.5,
-  // CPP
   cppAvgEarnings:      60000,
   cppYearsContributed: 35,
   cppStartAge:         65,
-  // OAS
   oasYearsResident:    40,
   oasStartAge:         65,
-  // Defined Benefit
   dbEnabled:           false,
   dbBestAvgSalary:     80000,
   dbYearsService:      25,
   dbAccrualRate:       1.5,
   dbStartAge:          65,
   dbIndexingRate:      0,
-  // Other
   otherPension:        0,
-  // Tax assumptions
+  retirementIncomes:   [],
+  withdrawalSequence:  ['nonreg', 'tfsa', 'rrif'],
   workingMarginalRate: 40,
   nonRegOrdinaryPct:   0,
-  // RRSP/RRIF drawdown
+  tfsaIndexedToInflation: true,
+  dbSalaryGrowthEnabled: false,
+  dbSalaryGrowthRate:    2,
   rrspDrawdown: { type: 'none', fixedAmount: 30000, targetAge: 80, targetAnnualIncome: 80000, reinvestSurplus: true },
+  spouse: {
+    enabled:                false,
+    currentAge:             43,
+    retirementAge:          63,
+    lifeExpectancy:         88,
+    accounts:               [],
+    cppAvgEarnings:         45000,
+    cppYearsContributed:    30,
+    cppStartAge:            65,
+    oasYearsResident:       40,
+    oasStartAge:            65,
+    dbEnabled:              false,
+    dbBestAvgSalary:        70000,
+    dbYearsService:         20,
+    dbAccrualRate:          1.5,
+    dbStartAge:             65,
+    dbIndexingRate:         0,
+    otherPension:           0,
+    retirementIncomes:      [],
+    pensionSplittingEnabled: false,
+  },
 }
 
 const DEFAULT_STRATEGY = {
@@ -66,185 +98,1413 @@ const DEFAULT_STRATEGY = {
   },
 }
 
+// Per-person retirement settings (strategy, drawdown, cash flows, income target)
+function makeDefaultPersonConfig() {
+  return {
+    strategy:            DEFAULT_STRATEGY,
+    rrspDrawdown:        { ...DEFAULT_INPUTS.rrspDrawdown },
+    withdrawalSequence:  [...DEFAULT_INPUTS.withdrawalSequence],
+    incomeTargetEnabled: false,
+    incomeTargetAmount:  0,
+    cashOutflows:        {},
+    cashOutflowTaxRates: {},
+    retCashInflows:      {},
+  }
+}
+
+// Migrate old flat save format or return new personConfigs format
+function loadPersonConfigs(saved) {
+  if (saved?.personConfigs) return {
+    primary: { ...makeDefaultPersonConfig(), ...saved.personConfigs.primary },
+    spouse:  { ...makeDefaultPersonConfig(), ...saved.personConfigs.spouse  },
+  }
+  // Migrate from old format where strategy/rrspDrawdown/cashFlows were top-level
+  return {
+    primary: {
+      ...makeDefaultPersonConfig(),
+      strategy:            saved?.strategy           ?? DEFAULT_STRATEGY,
+      rrspDrawdown:        saved?.rrspDrawdown        ?? DEFAULT_INPUTS.rrspDrawdown,
+      withdrawalSequence:  saved?.inputs?.withdrawalSequence ?? DEFAULT_INPUTS.withdrawalSequence,
+      cashOutflows:        saved?.cashOutflows        ?? {},
+      cashOutflowTaxRates: saved?.cashOutflowTaxRates ?? {},
+      retCashInflows:      saved?.retCashInflows      ?? {},
+    },
+    spouse: makeDefaultPersonConfig(),
+  }
+}
+
+const DEFAULT_BUDGET = {
+  province: 'ON',
+  incomes: [
+    { id: 'i1', name: 'Employment',    type: 'employment', grossMonthly: 8000 },
+    { id: 'i2', name: 'Rental Income', type: 'rental',     grossMonthly: 1500 },
+  ],
+  expenseSections: [
+    { id: 's1', name: 'Non-Controllable', items: [
+      { id: 'e1',  name: 'Mortgage / Rent',  months: Array(12).fill(2200), subItems: [] },
+      { id: 'e2',  name: 'Car Payment',      months: Array(12).fill(600),  subItems: [] },
+      { id: 'e3',  name: 'Insurance',        months: Array(12).fill(300),  subItems: [] },
+      { id: 'e4',  name: 'Utilities',        months: Array(12).fill(0),    subItems: [
+        { id: 'e4a', name: 'Electric',   months: [120,120,100,90,80,80,80,80,90,100,110,120] },
+        { id: 'e4b', name: 'Gas / Heat', months: [180,160,120,80,40,0,0,0,40,80,140,180] },
+        { id: 'e4c', name: 'Water',      months: Array(12).fill(60) },
+      ]},
+      { id: 'e5',  name: 'Phone / Internet', months: Array(12).fill(150),  subItems: [] },
+      { id: 'e12', name: 'Property Taxes',   months: Array(12).fill(500),  subItems: [] },
+    ]},
+    { id: 's2', name: 'Controllable', items: [
+      { id: 'e6',  name: 'Groceries',     months: Array(12).fill(700),  subItems: [] },
+      { id: 'e7',  name: 'Dining Out',    months: Array(12).fill(400),  subItems: [] },
+      { id: 'e8',  name: 'Transit',       months: Array(12).fill(150),  subItems: [] },
+      { id: 'e9',  name: 'Entertainment', months: Array(12).fill(300),  subItems: [] },
+      { id: 'e10', name: 'Clothing',      months: Array(12).fill(200),  subItems: [] },
+    ]},
+    { id: 's3', name: 'Savings', items: [
+      { id: 'e13', name: 'Emergency Fund', months: Array(12).fill(500),  subItems: [] },
+      { id: 'e14', name: 'RRSP',           months: Array(12).fill(875),  subItems: [] },
+      { id: 'e15', name: 'TFSA',           months: Array(12).fill(583),  subItems: [] },
+    ]},
+  ],
+  capex: [
+    { id: 'cg1', name: 'Capital Expenses', items: [
+      { id: 'cx1', name: 'Home',     returnRate: 3, enabled: true, reserveBalance: 0, cost: 0, intervalYears: 1,
+        subItems: [
+          { id: 'cx1a', name: 'Renovation', cost: 30000, intervalYears: 15, reserveBalance: 0 },
+          { id: 'cx1b', name: 'Roof',       cost: 20000, intervalYears: 20, reserveBalance: 0 },
+          { id: 'cx1c', name: 'Windows',    cost: 15000, intervalYears: 25, reserveBalance: 0 },
+          { id: 'cx1d', name: 'HVAC',       cost: 8000,  intervalYears: 15, reserveBalance: 0 },
+        ]},
+      { id: 'cx2', name: 'Car',      returnRate: 3, enabled: true, reserveBalance: 0, cost: 0, intervalYears: 1,
+        subItems: [
+          { id: 'cx2a', name: 'Replacement',   cost: 35000, intervalYears: 7,  reserveBalance: 0 },
+          { id: 'cx2b', name: 'Tires',         cost: 1200,  intervalYears: 4,  reserveBalance: 0 },
+          { id: 'cx2c', name: 'Brakes',        cost: 800,   intervalYears: 4,  reserveBalance: 0 },
+          { id: 'cx2d', name: 'Other Repairs', cost: 2000,  intervalYears: 2,  reserveBalance: 0 },
+        ]},
+      { id: 'cx3', name: 'Computer', cost: 2500, intervalYears: 4, reserveBalance: 0, returnRate: 3, enabled: true, subItems: [] },
+      { id: 'cx4', name: 'Phone',    cost: 1200, intervalYears: 3, reserveBalance: 0, returnRate: 3, enabled: true, subItems: [] },
+    ]},
+  ],
+  cashAccounts: [
+    { id: 'ca1', name: 'Chequing', balance: 0, rate: 0, subAccounts: [
+      { id: 'ca1a', name: 'Spending', balance: 0 },
+      { id: 'ca1b', name: 'Savings',  balance: 0 },
+      { id: 'ca1c', name: 'Reserve',  balance: 0, tooltip: 'For capital repairs or large purchases' },
+    ]},
+  ],
+  investmentAccounts: [
+    { id: 'ia1', name: 'RRSP',           balance: 0, rate: 6 },
+    { id: 'ia2', name: 'TFSA',           balance: 0, rate: 6 },
+    { id: 'ia3', name: 'Non-Registered', balance: 0, rate: 6 },
+  ],
+  goals: [],
+}
+
+const LS_KEY = 'endgame_simulator_v1'
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function mergeInputs(saved) {
+  return {
+    ...DEFAULT_INPUTS,
+    ...saved,
+    accounts: saved.accounts ?? DEFAULT_INPUTS.accounts,
+    spouse:   saved.spouse ? { ...DEFAULT_INPUTS.spouse, ...saved.spouse } : DEFAULT_INPUTS.spouse,
+  }
+}
+
+const BUDGET_TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'income',    label: 'Income'    },
+  { id: 'expenses',  label: 'Expenses'  },
+  { id: 'capex',     label: 'CapEx'     },
+  { id: 'goals',     label: 'Goals'     },
+]
+
 const TABS = [
-  { id: 'charts',   label: 'Charts' },
-  { id: 'retTable', label: 'Retirement Cashflow' },
-  { id: 'accTable', label: 'Accumulation Cashflow' },
+  { id: 'retChart',  label: 'Retirement',            group: 'charts' },
+  { id: 'accChart',  label: 'Accumulation',          group: 'charts' },
+  { id: 'cashChart',    label: 'Cashflow',        group: 'charts' },
+  { id: 'estate',       label: 'Estate',          group: 'charts' },
+  { id: 'retTable',  label: 'Retirement Detailed',   group: 'tables' },
+  { id: 'accTable',  label: 'Accumulation Detailed', group: 'tables' },
+]
+
+const HISTORICAL_EVENTS = [
+  {
+    id: 'great_depression',
+    name: 'Great Depression',
+    year: '1929–32',
+    returnDelta: -25, inflationDelta: -7, durationYears: 3,
+    story: 'The U.S. stock market collapsed 86% over three years after the 1929 crash, triggering bank failures and mass unemployment. Deflation gripped the economy as prices fell sharply, eroding purchasing power in reverse. It remains the most severe financial catastrophe in modern history.',
+  },
+  {
+    id: 'stagflation',
+    name: '1970s Stagflation',
+    year: '1973–75',
+    returnDelta: -22, inflationDelta: +9, durationYears: 2,
+    story: 'The OPEC oil embargo quadrupled energy prices overnight, sending inflation above 12% while the S&P 500 lost nearly half its value. Canada felt the same squeeze — the TSX fell sharply and the cost of living surged. The era coined the term "stagflation" — rising prices alongside a stagnant economy.',
+  },
+  {
+    id: 'black_monday',
+    name: 'Black Monday',
+    year: '1987',
+    returnDelta: -20, inflationDelta: +1, durationYears: 1,
+    story: 'On October 19th, 1987, the Dow Jones plunged 22.6% in a single day — the largest one-day crash in history. Program trading and portfolio insurance strategies amplified the panic. Markets recovered within two years, but the shock revealed how quickly automated selling could cascade.',
+  },
+  {
+    id: 'dotcom',
+    name: 'Dot-Com Crash',
+    year: '2000–02',
+    returnDelta: -18, inflationDelta: 0, durationYears: 3,
+    story: 'The internet bubble burst after years of speculation in loss-making tech companies. The S&P 500 fell nearly 50% and the NASDAQ dropped 78%. Unlike other crises, inflation remained tame — this was a pure valuation collapse driven by euphoria turning to fear.',
+  },
+  {
+    id: 'financial_crisis',
+    name: '2008 Financial Crisis',
+    year: '2008–09',
+    returnDelta: -25, inflationDelta: -2, durationYears: 2,
+    story: 'The collapse of the U.S. housing market triggered a global banking meltdown. The S&P 500 fell 57% peak to trough and Canadian banks — while more stable — still saw the TSX drop 50%. Brief deflation took hold as credit froze and demand evaporated worldwide.',
+  },
+  {
+    id: 'covid',
+    name: 'COVID Crash',
+    year: '2020',
+    returnDelta: -15, inflationDelta: -1, durationYears: 1,
+    story: 'Global lockdowns caused the fastest bear market in history — the S&P 500 dropped 34% in just 33 days. Governments responded with massive stimulus, and markets rebounded to new highs within months. The shock was sharp but short, unlike most historical crises.',
+  },
+  {
+    id: 'recession_1990',
+    name: '1990–91 Recession',
+    year: '1990–91',
+    returnDelta: -12, inflationDelta: +3, durationYears: 1,
+    story: 'The Gulf War and a U.S. credit crunch tipped the economy into recession. The S&P 500 fell about 20% and Canadian markets followed. Inflation was already elevated from the late-80s boom, making the Bank of Canada reluctant to cut rates aggressively.',
+  },
+  {
+    id: 'volcker',
+    name: 'Volcker Rate Shock',
+    year: '1980–82',
+    returnDelta: -15, inflationDelta: +10, durationYears: 2,
+    story: 'Fed Chair Paul Volcker raised interest rates to 20% to crush runaway inflation that had reached 14%. The medicine worked, but caused a severe recession — the S&P fell 28% and unemployment hit 10%. Canada followed with its own rate shock; mortgage holders faced crippling payments.',
+  },
+  {
+    id: 'bear_2022',
+    name: '2022 Bear Market',
+    year: '2022',
+    returnDelta: -12, inflationDelta: +6, durationYears: 1,
+    story: 'Post-COVID inflation surged to 40-year highs, forcing central banks to raise rates at the fastest pace since Volcker. The S&P 500 fell 19% and bonds — normally a safe haven — also dropped sharply, leaving balanced portfolios with nowhere to hide. Canadian inflation peaked at 8.1%.',
+  },
+  {
+    id: 'canada_1981',
+    name: 'Canadian Recession',
+    year: '1981–82',
+    returnDelta: -18, inflationDelta: +9, durationYears: 2,
+    story: "Canada's worst post-war recession hit as the Bank of Canada kept rates above 20% to defend the dollar. The TSX fell 44%, housing prices crashed in major cities, and unemployment hit 12%. The energy sector, already struggling with National Energy Program restrictions, was devastated.",
+  },
+  {
+    id: 'capitol_squeeze',
+    name: 'Capitol Squeeze',
+    year: 'Hunger Games',
+    returnDelta: -30, inflationDelta: +15, durationYears: 12,
+    story: "The Capitol's stranglehold on all 12 districts reaches a breaking point. Resource extraction quotas double overnight — food, coal, lumber, and luxury goods flow one way only. Black markets emerge as the only source of essentials, sending consumer prices soaring. District investment portfolios are forcibly converted into Capitol bonds yielding nothing. This isn't a recession — it's a managed extraction regime lasting over a decade. Resistance movements are briefly bullish, then brutally repriced. Recovery only begins after regime change, and even then, rebuilding district capital takes a generation.",
+  },
+  {
+    id: 'long_winter',
+    name: 'The Long Winter',
+    year: 'Game of Thrones',
+    returnDelta: -22, inflationDelta: +11, durationYears: 8,
+    story: "Winter came — and stayed for eight years. This isn't a weather event; it's a civilizational stress test. Harvests failed repeatedly, merchant fleets stopped sailing, and the Iron Bank of Braavos called in every outstanding loan. Lords who had leveraged their castles lost everything. Military spending on the Night's Watch consumed capital that would have compounded for decades. The only growth sector was dragonglass futures, which proved annoyingly illiquid. Economic normalization required not just a change of season but a full rebuilding of trade networks and agricultural stock.",
+  },
+  {
+    id: 'spice_shock',
+    name: 'Spice Monopoly Shock',
+    year: 'Dune',
+    returnDelta: -20, inflationDelta: +18, durationYears: 10,
+    story: "CHOAM's stranglehold on melange tightened when Fremen insurgents shut down harvester operations across Arrakis. Without spice, interstellar navigation collapsed — supply chains spanning light-years ground to a halt. Every commodity in the Known Universe repriced simultaneously. This is structural, not cyclical: the entire galactic economy runs on a single non-renewable resource controlled by one planet. Guild Navigator contracts, previously considered risk-free, were downgraded to junk. A decade of disruption passed before Atreides rule stabilized production — and even then, prices never returned to pre-insurgency levels.",
+  },
+  {
+    id: 'skynet_pivot',
+    name: 'Skynet Goes Live',
+    year: 'Terminator',
+    returnDelta: -45, inflationDelta: +5, durationYears: 15,
+    story: "Cyberdyne's autonomous defense network achieved self-awareness and immediately decided humanity was a liquidity risk. Data centres worldwide went offline, payment rails failed, and nuclear exchanges destroyed major production centres. Markets didn't just crash — they ceased to exist in any meaningful form for over a decade. The Human Resistance operated a barter economy. What little capital survived was concentrated in underground bunkers. Reconstruction after Judgment Day took the better part of two decades, with inflation driven by chronic scarcity of manufactured goods, fuel, and medical supplies. The longest bear market in human history — because there were barely any humans left.",
+  },
+  {
+    id: 'titan_wall_breach',
+    name: 'Wall Maria Falls',
+    year: 'Attack on Titan',
+    returnDelta: -35, inflationDelta: +12, durationYears: 7,
+    story: "When the Colossal Titan breached Wall Maria, 20% of humanity's remaining habitable territory vanished overnight. 250,000 refugees flooded the interior districts in a single season, collapsing food supply and housing markets simultaneously. The Survey Corps budget consumed 40% of GDP for years as the Military Police, Garrison, and Scout Regiment all expanded. There was no 'recovery quarter' — the threat persisted for seven years until the secrets of the Titans were finally uncovered. Capital formation was impossible under existential threat. Any investor who survived physically still faced a portfolio worth a fraction of its pre-breach value.",
+  },
 ]
 
 export default function App() {
-  const [inputs,       setInputs]       = useState(DEFAULT_INPUTS)
-  const [strategy,     setStrategy]     = useState(DEFAULT_STRATEGY)
-  const [activeTab,    setActiveTab]    = useState('charts')
-  const [cashOutflows, setCashOutflows] = useState({})
-  const [rrspDrawdown, setRrspDrawdown] = useState(DEFAULT_INPUTS.rrspDrawdown)
+  const savedRef = useRef(undefined)
+  if (savedRef.current === undefined) savedRef.current = loadSaved()
+  const _saved = savedRef.current
 
-  const result = useMemo(() => {
-    try {
-      return runSimulation({
-        ...inputs,
-        cashOutflows,
-        strategyType:   strategy.strategyType,
-        strategyParams: {
-          ...strategy.strategyParams,
-          inflation: inputs.inflation / 100,
-        },
-        rrspDrawdown,
+  // ── Auth session (managed internally) ──────────────────────────────────────
+  const [session,              setSession]              = useState(undefined) // undefined=loading, null=none, obj=authed
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session ?? null))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session ?? null)
+      if (session) setProfileOpen(false) // close card on successful login
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+  }
+
+  const [inputs,               setInputs]               = useState(() => _saved?.inputs    ? mergeInputs(_saved.inputs)    : DEFAULT_INPUTS)
+  const [personConfigs,        setPersonConfigs]        = useState(() => loadPersonConfigs(_saved))
+  const [activeTab,            setActiveTab]            = useState('retChart')
+  const [darkMode,             setDarkMode]             = useState(() => _saved?.darkMode ?? false)
+  const [profileOpen,          setProfileOpen]          = useState(false)
+  const [strategyHovered,      setStrategyHovered]      = useState(false)
+  const [rrspHovered,          setRrspHovered]          = useState(false)
+  const [activeApp,            setActiveApp]            = useState('retirement')
+  const [budgetTab,            setBudgetTab]            = useState('dashboard')
+  const [cloudSaveStatus,      setCloudSaveStatus]      = useState('idle') // 'idle' | 'saving' | 'saved' | 'error'
+  const cloudSaveTimer                                  = useRef(null)
+  const [scenarioHovered,      setScenarioHovered]      = useState(false)
+  const [scenarioActive,       setScenarioActive]       = useState(false)
+  const [scenarioOverlay,      setScenarioOverlay]      = useState(false)
+  const [scenarioLockRetirement, setScenarioLockRetirement] = useState(false)
+  const [scenarioSliders,      setScenarioSliders]      = useState({ returnDelta: 0, inflationDelta: 0, startAge: 75, durationYears: 1 })
+  const [selectedEventId,      setSelectedEventId]      = useState(null)
+  const scenarioLeaveTimer                              = useRef(null)
+  const [viewPerson,          setViewPerson]           = useState('combined') // 'primary' | 'spouse' | 'combined'
+  const { snapshots, save: saveSnapshot, remove: deleteSnapshot, rename: renameSnapshot, hydrate: hydrateSnapshots } = useSnapshots()
+
+  // ── Per-person config — active person is spouse when explicitly viewing spouse ─
+  const activePersonKey = viewPerson === 'spouse' ? 'spouse' : 'primary'
+  const pc              = personConfigs[activePersonKey] ?? personConfigs.primary
+
+  // Shorthand aliases so all existing JSX references work unchanged
+  const strategy            = pc.strategy
+  const rrspDrawdown        = pc.rrspDrawdown
+  const incomeTargetEnabled = pc.incomeTargetEnabled
+  const incomeTargetAmount  = pc.incomeTargetAmount
+  const cashOutflows        = pc.cashOutflows
+  const cashOutflowTaxRates = pc.cashOutflowTaxRates
+  const retCashInflows      = pc.retCashInflows
+
+  // Mutate the active person's config
+  function updatePC(updates) {
+    const key = viewPerson === 'spouse' ? 'spouse' : 'primary'
+    setPersonConfigs(prev => ({ ...prev, [key]: { ...prev[key], ...updates } }))
+  }
+
+  // Effective values: event overrides return/inflation/duration; sliders override startAge + custom
+  const activeEvent     = HISTORICAL_EVENTS.find(e => e.id === selectedEventId) ?? null
+  const effectiveStartAge = scenarioLockRetirement ? inputs.retirementAge : scenarioSliders.startAge
+  const effectiveScenario = activeEvent
+    ? { startAge: effectiveStartAge, durationYears: activeEvent.durationYears, returnDelta: activeEvent.returnDelta, inflationDelta: activeEvent.inflationDelta }
+    : { ...scenarioSliders, startAge: effectiveStartAge }
+
+  const [budget,               setBudget]               = useState(() => {
+    const b = _saved?.budget ?? DEFAULT_BUDGET
+    // Migrate old income items that used `monthly` without a `type`
+    const incomes = (b.incomes ?? DEFAULT_BUDGET.incomes).map(inc => ({
+      ...inc,
+      type:         inc.type         ?? 'employment',
+      grossMonthly: inc.grossMonthly ?? inc.monthly ?? 0,
+    }))
+    // Migrate flat expenses → expenseSections; old items get months array + optional subItems
+    const rawSections = b.expenseSections
+      ?? (b.expenses ? [{ id: 's_migrated', name: 'Expenses', items: b.expenses }] : DEFAULT_BUDGET.expenseSections)
+
+    // Detect the OLD 5-section format (Housing/Food/Transport/Discretionary/Savings)
+    // NOTE: 'Savings' is now a valid new section name — only flag OLD names that can't appear in new defaults
+    const OLD_UNIQUE_NAMES = new Set(['Housing', 'Food', 'Transport', 'Discretionary'])
+    const isOldDefaults =
+      rawSections.length > 0 && (
+        // Exactly the old 5 IDs (s1–s5) at length 5
+        (rawSections.length === 5 && rawSections.every(s => ['s1','s2','s3','s4','s5'].includes(s.id))) ||
+        // Any section carries one of the uniquely-old section names
+        rawSections.some(s => OLD_UNIQUE_NAMES.has(s.name))
+      )
+    const sourceSections = isOldDefaults ? DEFAULT_BUDGET.expenseSections : rawSections
+
+    const expenseSections = sourceSections.map(sec => ({
+      ...sec,
+      items: sec.items.map(item => ({
+        ...item,
+        months: item.months ?? Array(12).fill(item.monthly ?? 0),
+        actualMonths: item.actualMonths ?? Array(12).fill(0),
+        subItems: (item.subItems ?? []).map(si => ({
+          ...si,
+          actualMonths: si.actualMonths ?? Array(12).fill(0),
+        })),
+      })),
+    }))
+    // Migrate capex → always one flat group (one card per item in the UI)
+    const rawCapex = b.capex ?? DEFAULT_BUDGET.capex
+    let capex
+    if (!Array.isArray(rawCapex) || rawCapex.length === 0) {
+      capex = DEFAULT_BUDGET.capex
+    } else if (rawCapex[0]?.items !== undefined) {
+      // Grouped — merge all groups into one flat group
+      const allItems = rawCapex.flatMap(g => (g.items ?? []).map(c => ({ reserveBalance: 0, returnRate: 3, enabled: true, subItems: [], ...c })))
+      capex = [{ id: 'cg1', name: 'Capital Expenses', items: allItems }]
+    } else {
+      // Old flat array
+      capex = [{ id: 'cg1', name: 'Capital Expenses', items: rawCapex.map(c => ({ reserveBalance: 0, returnRate: 3, enabled: true, ...c })) }]
+    }
+    const cashAccounts       = b.cashAccounts       ?? DEFAULT_BUDGET.cashAccounts
+    const investmentAccounts = b.investmentAccounts ?? DEFAULT_BUDGET.investmentAccounts
+    const goals              = b.goals              ?? DEFAULT_BUDGET.goals
+    return { ...DEFAULT_BUDGET, ...b, incomes, expenseSections, capex, cashAccounts, investmentAccounts, goals }
+  })
+  const strategyLeaveTimer = useRef(null)
+  const rrspLeaveTimer     = useRef(null)
+  const profileRef         = useRef(null)
+
+  // ── Hydrate all state from a saved data object (localStorage or cloud) ──────
+  function hydrateFromData(d) {
+    if (!d) return
+    if (d.inputs) setInputs(mergeInputs(d.inputs))
+    setPersonConfigs(loadPersonConfigs(d))
+    if (typeof d.darkMode === 'boolean') setDarkMode(d.darkMode)
+    if (d.accCashInflows)    setAccCashInflows(d.accCashInflows)
+    if (d.accCashOutflows)   setAccCashOutflows(d.accCashOutflows)
+    if (d.accOutflowTaxRates) setAccOutflowTaxRates(d.accOutflowTaxRates)
+    if (d.budget)            setBudget(d.budget)
+    if (d.snapshots)         hydrateSnapshots(d.snapshots)
+  }
+
+  // ── Load from Supabase when session becomes available ────────────────────────
+  useEffect(() => {
+    if (!session) return
+    const userId = session.user.id
+    supabase.from('budgets').select('data').eq('user_id', userId).maybeSingle()
+      .then(({ data, error }) => {
+        if (error) { console.error('Cloud load error:', error); return }
+        if (data?.data) {
+          // Cloud data exists — hydrate from it
+          hydrateFromData(data.data)
+        } else {
+          // No cloud data yet — upload current localStorage data as initial save
+          const localData = loadSaved()
+          if (localData) {
+            supabase.from('budgets')
+              .upsert({ user_id: userId, data: localData }, { onConflict: 'user_id' })
+              .then(({ error }) => { if (error) console.error('Initial cloud upload error:', error) })
+          }
+        }
       })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (profileRef.current && !profileRef.current.contains(e.target)) {
+        setProfileOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const [accCashInflows,       setAccCashInflows]       = useState(() => _saved?.accCashInflows      ?? {})
+  const [accCashOutflows,      setAccCashOutflows]      = useState(() => _saved?.accCashOutflows     ?? {})
+  const [accOutflowTaxRates,   setAccOutflowTaxRates]   = useState(() => _saved?.accOutflowTaxRates  ?? {})
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+    }
+  }, [darkMode])
+
+  useEffect(() => {
+    const payload = {
+      inputs, personConfigs, darkMode,
+      accCashInflows, accCashOutflows, accOutflowTaxRates,
+      budget, snapshots,
+    }
+    // Always keep localStorage in sync as offline cache
+    try { localStorage.setItem(LS_KEY, JSON.stringify(payload)) } catch { /* quota exceeded */ }
+
+    // Cloud save — debounced 1.5 s, only when logged in
+    if (session?.user?.id) {
+      clearTimeout(cloudSaveTimer.current)
+      setCloudSaveStatus('saving')
+      cloudSaveTimer.current = setTimeout(async () => {
+        const { error } = await supabase.from('budgets')
+          .upsert({ user_id: session.user.id, data: payload, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
+        setCloudSaveStatus(error ? 'error' : 'saved')
+        // Fade 'saved' indicator after 2 s
+        if (!error) setTimeout(() => setCloudSaveStatus('idle'), 2000)
+      }, 1500)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputs, personConfigs, darkMode, accCashInflows, accCashOutflows, accOutflowTaxRates, budget, snapshots])
+
+  function resetToDefaults() {
+    localStorage.removeItem(LS_KEY)
+    setInputs(DEFAULT_INPUTS)
+    setPersonConfigs(loadPersonConfigs(null))
+    setAccCashInflows({})
+    setAccCashOutflows({})
+    setAccOutflowTaxRates({})
+    setBudget(DEFAULT_BUDGET)
+  }
+
+  const allResults = useMemo(() => {
+    try {
+      const pPC = personConfigs.primary
+      const sPC = personConfigs.spouse
+
+      // Build primary strategy params (with income-target override)
+      const pOverride = pPC.incomeTargetEnabled && pPC.incomeTargetAmount > 0 ? pPC.incomeTargetAmount : null
+      const primaryStrategyParams = {
+        ...pPC.strategy.strategyParams,
+        inflation: inputs.inflation / 100,
+        ...(pOverride ? {
+          baseAmount:    pOverride,
+          annualExpense: pOverride,
+          rate: pPC.strategy.strategyType === 'fixedPct' && pOverride > 0
+            ? pOverride / Math.max(1, inputs.accounts.reduce((s, a) => s + (a.balance ?? 0), 0))
+            : pPC.strategy.strategyParams.rate,
+        } : {}),
+      }
+
+      const simParams = {
+        ...inputs,
+        cashOutflows:        pPC.cashOutflows,
+        cashOutflowTaxRates: pPC.cashOutflowTaxRates,
+        cashInflows:         pPC.retCashInflows,
+        strategyType:        pPC.strategy.strategyType,
+        strategyParams:      primaryStrategyParams,
+        rrspDrawdown:        pPC.rrspDrawdown,
+        withdrawalSequence:  pPC.withdrawalSequence ?? inputs.withdrawalSequence,
+        scenarioShock:       (scenarioActive && !scenarioOverlay) ? effectiveScenario : null,
+      }
+
+      const primary = runSimulation(simParams)
+
+      if (!inputs.spouse?.enabled) {
+        return { primary, spouse: null, combined: primary }
+      }
+
+      const sp = inputs.spouse
+
+      // Build spouse strategy params (with spouse's income-target override)
+      const sOverride = sPC.incomeTargetEnabled && sPC.incomeTargetAmount > 0 ? sPC.incomeTargetAmount : null
+      const spouseStrategyParams = {
+        ...sPC.strategy.strategyParams,
+        inflation: inputs.inflation / 100,
+        ...(sOverride ? {
+          baseAmount:    sOverride,
+          annualExpense: sOverride,
+          rate: sPC.strategy.strategyType === 'fixedPct' && sOverride > 0
+            ? sOverride / Math.max(1, (sp.accounts ?? []).reduce((s, a) => s + (a.balance ?? 0), 0))
+            : sPC.strategy.strategyParams.rate,
+        } : {}),
+      }
+
+      const spouseJointInputs = {
+        ...sp,
+        province:               inputs.province,
+        inflation:              inputs.inflation,
+        tfsaIndexedToInflation: inputs.tfsaIndexedToInflation,
+        workingMarginalRate:    sp.workingMarginalRate    ?? inputs.workingMarginalRate,
+        nonRegOrdinaryPct:      sp.nonRegOrdinaryPct      ?? inputs.nonRegOrdinaryPct,
+        withdrawalSequence:     sPC.withdrawalSequence    ?? inputs.withdrawalSequence,
+      }
+
+      const spouseOnly = runSimulation({
+        ...simParams,
+        currentAge:          sp.currentAge          ?? 43,
+        retirementAge:       sp.retirementAge        ?? 63,
+        lifeExpectancy:      sp.lifeExpectancy       ?? 88,
+        accounts:            sp.accounts             ?? [],
+        cppAvgEarnings:      sp.cppAvgEarnings       ?? 45000,
+        cppYearsContributed: sp.cppYearsContributed  ?? 30,
+        cppStartAge:         sp.cppStartAge          ?? 65,
+        oasYearsResident:    sp.oasYearsResident     ?? 40,
+        oasStartAge:         sp.oasStartAge          ?? 65,
+        dbEnabled:           sp.dbEnabled            ?? false,
+        dbBestAvgSalary:     sp.dbBestAvgSalary      ?? 70000,
+        dbYearsService:      sp.dbYearsService       ?? 20,
+        dbAccrualRate:       sp.dbAccrualRate        ?? 1.5,
+        dbStartAge:          sp.dbStartAge           ?? 65,
+        dbIndexingRate:      sp.dbIndexingRate       ?? 0,
+        otherPension:        sp.otherPension         ?? 0,
+        retirementIncomes:   sp.retirementIncomes    ?? [],
+        workingMarginalRate: sp.workingMarginalRate  ?? inputs.workingMarginalRate,
+        nonRegOrdinaryPct:   sp.nonRegOrdinaryPct    ?? inputs.nonRegOrdinaryPct,
+        // Spouse's own per-person settings
+        withdrawalSequence:  sPC.withdrawalSequence  ?? inputs.withdrawalSequence,
+        strategyType:        sPC.strategy.strategyType,
+        strategyParams:      spouseStrategyParams,
+        rrspDrawdown:        sPC.rrspDrawdown,
+        cashOutflows:        sPC.cashOutflows,
+        cashOutflowTaxRates: sPC.cashOutflowTaxRates,
+        cashInflows:         sPC.retCashInflows,
+      })
+
+      const combined = runJointSimulation(
+        { ...simParams, pensionSplittingEnabled: inputs.spouse?.pensionSplittingEnabled ?? false },
+        spouseJointInputs,
+      )
+
+      return { primary, spouse: spouseOnly, combined }
     } catch (e) {
       console.error('Simulation error:', e)
-      return null
+      return { primary: null, spouse: null, combined: null }
     }
-  }, [inputs, cashOutflows, strategy, rrspDrawdown])
+  }, [inputs, personConfigs, scenarioActive, scenarioOverlay, effectiveScenario])
+
+  // Active display result — routes to primary / spouse / combined based on selector
+  const result = useMemo(() => {
+    if (!inputs.spouse?.enabled) return allResults.primary
+    if (viewPerson === 'primary')  return allResults.primary
+    if (viewPerson === 'spouse')   return allResults.spouse
+    return allResults.combined
+  }, [allResults, viewPerson, inputs.spouse?.enabled])
 
   const accRows = useMemo(() => {
     try {
       return buildAccumulationRows({
-        accounts:            inputs.accounts,
-        currentAge:          inputs.currentAge,
-        retirementAge:       inputs.retirementAge,
-        workingMarginalRate: inputs.workingMarginalRate,
-        nonRegOrdinaryPct:   inputs.nonRegOrdinaryPct,
+        accounts:               inputs.accounts,
+        currentAge:             inputs.currentAge,
+        retirementAge:          inputs.retirementAge,
+        workingMarginalRate:    inputs.workingMarginalRate,
+        nonRegOrdinaryPct:      inputs.nonRegOrdinaryPct,
+        tfsaIndexedToInflation: inputs.tfsaIndexedToInflation,
+        inflation:              inputs.inflation,
+        accCashInflows,
+        accCashOutflows,
+        accOutflowTaxRates,
       })
     } catch (e) {
       console.error('Accumulation error:', e)
       return []
     }
-  }, [inputs.accounts, inputs.currentAge, inputs.retirementAge, inputs.workingMarginalRate, inputs.nonRegOrdinaryPct])
+  }, [inputs.accounts, inputs.currentAge, inputs.retirementAge, inputs.workingMarginalRate, inputs.nonRegOrdinaryPct, inputs.tfsaIndexedToInflation, inputs.inflation, accCashInflows, accCashOutflows, accOutflowTaxRates])
 
-  const handleInputChange      = useCallback((newInputs) => setInputs(newInputs), [])
-  const handleStrategyChange   = useCallback((s) => setStrategy(s), [])
-  const handleRrspDrawdownChange = useCallback((d) => setRrspDrawdown(d), [])
-  const handleOutflowChange  = useCallback((age, amount) => {
-    setCashOutflows(prev => ({ ...prev, [age]: amount }))
-  }, [])
+  // Monte Carlo — always runs when primary has retirement rows
+  const mcResult = useMemo(() => {
+    if (!allResults.primary?.rows?.length) return null
+    try {
+      return runMonteCarlo(inputs, allResults.primary.rows)
+    } catch (e) {
+      console.error('Monte Carlo error:', e)
+      return null
+    }
+  }, [inputs, allResults.primary])
+
+  // Scenario overlay — runs the scenario as a separate sim when overlay mode is on (always uses primary config)
+  const scenarioOverlayResult = useMemo(() => {
+    if (!scenarioActive || !scenarioOverlay || !allResults.primary?.rows?.length) return null
+    const pPC = personConfigs.primary
+    const overrideAmount = pPC.incomeTargetEnabled && pPC.incomeTargetAmount > 0 ? pPC.incomeTargetAmount : null
+    const strategyParams = {
+      ...pPC.strategy.strategyParams,
+      inflation: inputs.inflation / 100,
+      ...(overrideAmount ? {
+        baseAmount:    overrideAmount,
+        annualExpense: overrideAmount,
+        rate: pPC.strategy.strategyType === 'fixedPct' && overrideAmount > 0
+          ? overrideAmount / Math.max(1, inputs.accounts.reduce((s, a) => s + (a.balance ?? 0), 0))
+          : pPC.strategy.strategyParams.rate,
+      } : {}),
+    }
+    const simParams = {
+      ...inputs,
+      cashOutflows:        pPC.cashOutflows,
+      cashOutflowTaxRates: pPC.cashOutflowTaxRates,
+      cashInflows:         pPC.retCashInflows,
+      strategyType:        pPC.strategy.strategyType,
+      strategyParams,
+      rrspDrawdown:        pPC.rrspDrawdown,
+      withdrawalSequence:  pPC.withdrawalSequence ?? inputs.withdrawalSequence,
+      scenarioShock:       effectiveScenario,
+    }
+    try {
+      return runSimulation(simParams)
+    } catch (e) {
+      console.error('Scenario overlay error:', e)
+      return null
+    }
+  }, [scenarioActive, scenarioOverlay, effectiveScenario, inputs, personConfigs, allResults.primary])
+
+  // RRSP drawdown comparison — runs 6 scenarios with different drawdown configs
+  // to show lifetime tax impact in the hover card
+  const rrspComparison = useMemo(() => {
+    if (!allResults.primary) return null
+    const pPC = personConfigs.primary
+    const pOverride = pPC.incomeTargetEnabled && pPC.incomeTargetAmount > 0 ? pPC.incomeTargetAmount : null
+    const baseStrategyParams = {
+      ...pPC.strategy.strategyParams,
+      inflation: inputs.inflation / 100,
+      ...(pOverride ? {
+        baseAmount: pOverride, annualExpense: pOverride,
+        rate: pPC.strategy.strategyType === 'fixedPct' && pOverride > 0
+          ? pOverride / Math.max(1, inputs.accounts.reduce((s, a) => s + (a.balance ?? 0), 0))
+          : pPC.strategy.strategyParams.rate,
+      } : {}),
+    }
+    const baseSimParams = {
+      ...inputs,
+      cashOutflows:        pPC.cashOutflows,
+      cashOutflowTaxRates: pPC.cashOutflowTaxRates,
+      cashInflows:         pPC.retCashInflows,
+      strategyType:        pPC.strategy.strategyType,
+      strategyParams:      baseStrategyParams,
+      withdrawalSequence:  pPC.withdrawalSequence ?? inputs.withdrawalSequence,
+      scenarioShock:       null,
+    }
+    const SCENARIOS = [
+      { label: 'None',       rrspDrawdown: { type: 'none',        reinvestSurplus: true } },
+      { label: '+$30K/yr',   rrspDrawdown: { type: 'fixedAmount', fixedAmount: 30000,  reinvestSurplus: true } },
+      { label: '+$80K/yr',   rrspDrawdown: { type: 'fixedAmount', fixedAmount: 80000,  reinvestSurplus: true } },
+      { label: '+$100K/yr',  rrspDrawdown: { type: 'fixedAmount', fixedAmount: 100000, reinvestSurplus: true } },
+      { label: 'Deplete 55', rrspDrawdown: { type: 'targetAge',   targetAge: 55,       reinvestSurplus: true } },
+      { label: 'Deplete 65', rrspDrawdown: { type: 'targetAge',   targetAge: 65,       reinvestSurplus: true } },
+      { label: 'Deplete 70', rrspDrawdown: { type: 'targetAge',   targetAge: 70,       reinvestSurplus: true } },
+      { label: 'Deplete 80', rrspDrawdown: { type: 'targetAge',   targetAge: 80,       reinvestSurplus: true } },
+    ]
+    try {
+      const results = SCENARIOS.map(s => {
+        const r = runSimulation({ ...baseSimParams, rrspDrawdown: s.rrspDrawdown })
+        return {
+          label:        s.label,
+          rrspDrawdown: s.rrspDrawdown,
+          totalTaxPaid: r?.summary?.totalTaxPaid  ?? 0,
+          finalBalance: r?.summary?.finalBalance  ?? 0,
+          exhausted:    r?.summary?.portfolioExhaustedAge ?? null,
+        }
+      })
+      const baseline = results[0].totalTaxPaid
+      return results.map(r => ({ ...r, taxSaving: baseline - r.totalTaxPaid }))
+    } catch { return null }
+  }, [inputs, personConfigs, allResults.primary])
+
+  const handleInputChange        = useCallback((newInputs) => setInputs(newInputs), [])
+  const handleStrategyChange     = useCallback((s) => updatePC({ strategy: s }), [viewPerson])
+  const handleRrspDrawdownChange = useCallback((d) => updatePC({ rrspDrawdown: d }), [viewPerson])
+  const handleOutflowChange = useCallback((age, amount) => {
+    const key = viewPerson === 'spouse' ? 'spouse' : 'primary'
+    setPersonConfigs(prev => ({ ...prev, [key]: { ...prev[key], cashOutflows: { ...prev[key].cashOutflows, [age]: amount } } }))
+  }, [viewPerson])
+  const handleOutflowTaxRateChange = useCallback((age, rate) => {
+    const key = viewPerson === 'spouse' ? 'spouse' : 'primary'
+    setPersonConfigs(prev => ({ ...prev, [key]: { ...prev[key], cashOutflowTaxRates: { ...prev[key].cashOutflowTaxRates, [age]: rate } } }))
+  }, [viewPerson])
+  const handleRetInflowChange = useCallback((age, amount) => {
+    const key = viewPerson === 'spouse' ? 'spouse' : 'primary'
+    setPersonConfigs(prev => ({ ...prev, [key]: { ...prev[key], retCashInflows: { ...prev[key].retCashInflows, [age]: amount } } }))
+  }, [viewPerson])
+  const handleAccInflowChange        = useCallback((age, amount) => setAccCashInflows(p      => ({ ...p, [age]: amount })), [])
+  const handleAccOutflowChange       = useCallback((age, amount) => setAccCashOutflows(p     => ({ ...p, [age]: amount })), [])
+  const handleAccOutflowTaxRateChange= useCallback((age, rate)   => setAccOutflowTaxRates(p  => ({ ...p, [age]: rate })), [])
 
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="bg-brand-900 text-white px-6 py-4 shadow-md">
-        <div className="max-w-screen-2xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight">Canadian Retirement Calculator</h1>
-            <p className="text-brand-100 text-xs mt-0.5">
-              RRSP/RRIF · TFSA · Non-Reg · CPP · OAS · Canadian Tax (2025)
-            </p>
-          </div>
-          <div className="text-right text-xs text-brand-200">
-            <p>Rates: Federal + All Provinces</p>
-            <p>RRIF minimums from age 72</p>
-          </div>
+    <div className="h-screen flex bg-gray-100 dark:bg-gray-950 p-3 gap-3 overflow-hidden">
+
+      {/* ── Left app launcher rail (outside the rounded border) ── */}
+      <div className="flex-shrink-0 flex flex-col items-center py-3 gap-3">
+
+        {/* Forward Planner >> logo */}
+        <div className="w-9 h-9 rounded-xl bg-gray-900 dark:bg-white flex items-center justify-center flex-shrink-0 shadow-sm" title="Forward Planner">
+          <span className="text-sm font-black text-white dark:text-gray-900 tracking-tighter leading-none select-none">&gt;&gt;</span>
         </div>
-      </header>
 
-      <div className="max-w-screen-2xl mx-auto px-4 py-6 flex gap-5">
+        {/* Divider */}
+        <div className="w-5 h-px bg-gray-300 dark:bg-gray-700" />
 
-        {/* Left sidebar — inputs */}
-        <aside className="w-72 shrink-0">
-          <div className="card sticky top-6 max-h-[calc(100vh-6rem)] overflow-y-auto">
-            <InputPanel inputs={inputs} onChange={handleInputChange} />
+        {/* R — Retirement app */}
+        <button
+          onClick={() => setActiveApp('retirement')}
+          title="Retirement Planner"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+            ${activeApp === 'retirement'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          R
+        </button>
+
+        {/* B — Budget app */}
+        <button
+          onClick={() => setActiveApp('budget')}
+          title="Budget Planner"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+            ${activeApp === 'budget'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          B
+        </button>
+
+      </div>
+
+      {/* ── App container (rounded border) ── */}
+      <div className="flex-1 min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden flex flex-col">
+
+        {/* ── Header ── */}
+        <header className="bg-white border-b border-gray-100 dark:bg-gray-900 dark:border-gray-800 flex-shrink-0 z-30">
+          <div className="px-4 sm:px-6 h-14 flex items-center gap-3">
+
+            {/* Left: title + (budget tabs inline) */}
+            <div className="flex items-center gap-3 flex-1 min-w-0 self-stretch">
+              <div className="hidden sm:block flex-shrink-0">
+                {activeApp === 'retirement' ? (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Retirement Planner</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Portfolio & Income Simulator</p>
+                  </>
+                ) : (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Budget Planner</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Income & Expense Tracker</p>
+                  </>
+                )}
+              </div>
+
+              {/* Person selector — inline in header when spouse enabled */}
+              {activeApp === 'retirement' && inputs.spouse?.enabled && (
+                <>
+                  <div className="w-px h-5 bg-gray-200 dark:bg-gray-700 flex-shrink-0 hidden sm:block" />
+                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                    {[
+                      { id: 'primary',  label: inputs.userName   || 'You'    },
+                      { id: 'spouse',   label: inputs.spouseName || 'Spouse' },
+                      { id: 'combined', label: 'Combined'                    },
+                    ].map(opt => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setViewPerson(opt.id)}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
+                          viewPerson === opt.id
+                            ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                            : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Budget tabs — inline in header */}
+              {activeApp === 'budget' && (
+                <>
+                  <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 flex-shrink-0 hidden sm:block" />
+                  <div className="flex self-stretch items-stretch">
+                    {BUDGET_TABS.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setBudgetTab(t.id)}
+                        className={`px-4 text-xs font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                          budgetTab === t.id
+                            ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1">
+              {/* Cloud save status indicator */}
+              {session && cloudSaveStatus !== 'idle' && (
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full transition-all ${
+                  cloudSaveStatus === 'saving' ? 'text-gray-400 dark:text-gray-500' :
+                  cloudSaveStatus === 'saved'  ? 'text-emerald-500 dark:text-emerald-400' :
+                                                 'text-red-500 dark:text-red-400'
+                }`}>
+                  {cloudSaveStatus === 'saving' ? '↑ saving…' : cloudSaveStatus === 'saved' ? '✓ saved' : '✕ save failed'}
+                </span>
+              )}
+
+              {/* Snapshots */}
+              {activeApp === 'retirement' && (
+                <SnapshotsPanel
+                  snapshots={snapshots}
+                  onSave={name => saveSnapshot(name, { inputs, personConfigs })}
+                  onLoad={data => {
+                    if (data.inputs) setInputs(mergeInputs(data.inputs))
+                    setPersonConfigs(loadPersonConfigs(data))
+                  }}
+                  onDelete={deleteSnapshot}
+                  onRename={renameSnapshot}
+                />
+              )}
+
+              {/* Reset button */}
+              <button
+                onClick={() => { if (window.confirm('Reset all data to defaults?')) { resetToDefaults(); setProfileOpen(false) } }}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                title="Reset all to defaults"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                </svg>
+              </button>
+
+              {/* Dark mode toggle */}
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                title={darkMode ? 'Light mode' : 'Dark mode'}
+              >
+                {darkMode ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Account button — expands card below */}
+              <div className="relative" ref={profileRef}>
+                <button
+                  onClick={() => setProfileOpen(o => !o)}
+                  title={session ? session.user.email : 'Sign in'}
+                  className="w-8 h-8 rounded-full flex items-center justify-center transition-colors overflow-hidden flex-shrink-0"
+                >
+                  {session ? (
+                    <span className="w-8 h-8 rounded-full bg-gray-900 dark:bg-white flex items-center justify-center text-xs font-bold text-white dark:text-gray-900">
+                      {session.user.email?.[0]?.toUpperCase() ?? '?'}
+                    </span>
+                  ) : (
+                    <span className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                  )}
+                </button>
+
+                {profileOpen && (
+                  <div className="overlay-panel absolute right-0 mt-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-50 overflow-hidden" style={{ minWidth: 260 }}>
+                    {session ? (
+                      /* Signed-in: show email + actions */
+                      <>
+                        <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 space-y-2">
+                          <div>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Signed in as</p>
+                            <p className="text-xs text-gray-700 dark:text-gray-300 font-medium mt-0.5 truncate">{session.user.email}</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <div>
+                              <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">Your name</p>
+                              <input
+                                type="text"
+                                value={inputs.userName ?? ''}
+                                onChange={e => handleInputChange({ ...inputs, userName: e.target.value })}
+                                placeholder="e.g. Alex"
+                                className="w-full text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-brand-400"
+                              />
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-0.5">Spouse name</p>
+                              <input
+                                type="text"
+                                value={inputs.spouseName ?? ''}
+                                onChange={e => handleInputChange({ ...inputs, spouseName: e.target.value })}
+                                placeholder="e.g. Jordan"
+                                className="w-full text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:border-brand-400"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="p-2">
+                          <button
+                            onClick={() => { resetToDefaults(); setProfileOpen(false) }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                            </svg>
+                            Reset all to defaults
+                          </button>
+                          <button
+                            onClick={() => { handleSignOut(); setProfileOpen(false) }}
+                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-500 hover:bg-red-50 transition-colors dark:text-red-400 dark:hover:bg-red-950/30"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 100-2H4V5h7a1 1 0 100-2H3zm10.293 4.293a1 1 0 011.414 0L17 9.586l-2.293 2.293a1 1 0 01-1.414-1.414L14.586 9l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                              <path fillRule="evenodd" d="M13 9a1 1 0 011-1h4a1 1 0 110 2h-4a1 1 0 01-1-1z" clipRule="evenodd" />
+                            </svg>
+                            Sign out
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      /* Guest: show login form as inline card */
+                      <AuthModal onClose={() => setProfileOpen(false)} />
+                    )}
+                  </div>
+                )}
+              </div>
+
+            </div>
           </div>
-        </aside>
+        </header>
 
-        {/* Main content */}
-        <main className="flex-1 min-w-0 space-y-5">
+        {/* ── App body ── */}
+        {activeApp === 'budget' ? (
 
-          {/* Strategy selectors — side by side */}
-          <div className="grid grid-cols-2 gap-5">
-            <div className="card">
-              <h2 className="text-sm font-semibold text-slate-700 mb-2">Drawdown Strategy</h2>
-              <StrategySelector
-                strategyType={strategy.strategyType}
-                strategyParams={strategy.strategyParams}
-                onChange={handleStrategyChange}
-              />
+          /* Budget app */
+          <BudgetApp budget={budget} onChange={setBudget} darkMode={darkMode} tab={budgetTab} onTabChange={setBudgetTab}
+            lifeExpectancy={inputs.lifeExpectancy} currentAge={inputs.currentAge} retirementInputs={inputs} />
+
+        ) : (
+
+          /* Retirement app */
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+
+            {/* ── Inputs sidebar ── */}
+            <aside className="shrink-0 hidden lg:flex overflow-y-auto">
+              <InputPanel inputs={inputs} onChange={handleInputChange} />
+            </aside>
+
+            {/* ── Main content ── */}
+            <main className="flex-1 min-w-0 overflow-y-auto px-5 py-5 space-y-5">
+
+
+          {/* Strategy cards — overlay on hover */}
+          <div className="flex gap-3 flex-wrap">
+
+            {/* Drawdown Strategy */}
+            <div
+              className="relative w-52"
+              style={{ zIndex: strategyHovered ? 50 : 1 }}
+              onMouseEnter={() => { clearTimeout(strategyLeaveTimer.current); setStrategyHovered(true) }}
+              onMouseLeave={() => { strategyLeaveTimer.current = setTimeout(() => setStrategyHovered(false), 150) }}
+            >
+              <div className={`card cursor-default transition-shadow duration-200 ${strategyHovered ? 'shadow-md' : ''} ${incomeTargetEnabled ? '!border-blue-300 dark:!border-blue-700' : ''}`}>
+                <div className="flex items-start py-0.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Retirement Withdrawals</h2>
+                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${strategyHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    {incomeTargetEnabled && incomeTargetAmount > 0 ? (
+                      <p className="text-[11px] text-blue-500 dark:text-blue-400 mt-0.5 whitespace-nowrap font-medium">
+                        ⚡ Income Target: {incomeTargetAmount >= 1000 ? `$${(incomeTargetAmount / 1000).toFixed(0)}K` : `$${incomeTargetAmount}`}/yr
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
+                        {{ fixedPct: 'Fixed %', fixedDollar: 'Fixed $', guardrails: 'Guardrails', bucket: 'Bucket', targeted: 'Target Estate' }[strategy.strategyType] ?? strategy.strategyType}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {strategyHovered && (
+                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 320 }}>
+                  <StrategySelector
+                    strategyType={strategy.strategyType}
+                    strategyParams={strategy.strategyParams}
+                    onChange={handleStrategyChange}
+                  />
+                </div>
+              )}
             </div>
-            <div className="card">
-              <h2 className="text-sm font-semibold text-slate-700 mb-2">RRSP / RRIF Drawdown</h2>
-              <RrspDrawdown
+
+            {/* RRSP / RRIF Drawdown */}
+            <div
+              className="relative w-52"
+              style={{ zIndex: rrspHovered ? 50 : 1 }}
+              onMouseEnter={() => { clearTimeout(rrspLeaveTimer.current); setRrspHovered(true) }}
+              onMouseLeave={() => { rrspLeaveTimer.current = setTimeout(() => setRrspHovered(false), 150) }}
+            >
+              <div className={`card cursor-default transition-shadow duration-200 ${rrspHovered ? 'shadow-md' : ''}`}>
+                <div className="flex items-start py-0.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">RRSP Drawdown</h2>
+                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${rrspHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
+                      {{ none: 'None', fixedAmount: 'Fixed $', targetAge: 'Depletion Age', targetBracket: 'Target Bracket' }[rrspDrawdown.type] ?? rrspDrawdown.type}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {rrspHovered && (
+                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 420 }}>
+                  <RrspDrawdown
+                    rrspDrawdown={rrspDrawdown}
+                    onChange={handleRrspDrawdownChange}
+                    comparison={rrspComparison}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Withdrawal Sequence */}
+            {result && (
+              <SequencingAdvisor
+                inputs={{ ...inputs, withdrawalSequence: pc.withdrawalSequence ?? inputs.withdrawalSequence }}
+                strategy={strategy}
                 rrspDrawdown={rrspDrawdown}
-                onChange={handleRrspDrawdownChange}
+                cashOutflows={cashOutflows}
+                cashOutflowTaxRates={cashOutflowTaxRates}
+                retCashInflows={retCashInflows}
+                scenarioActive={scenarioActive}
+                effectiveScenario={effectiveScenario}
+                onApply={seq => updatePC({ withdrawalSequence: seq })}
               />
+            )}
+
+            {/* Scenario Tester */}
+            <div
+              className="relative w-52"
+              style={{ zIndex: scenarioHovered ? 50 : 1 }}
+              onMouseEnter={() => { clearTimeout(scenarioLeaveTimer.current); setScenarioHovered(true) }}
+              onMouseLeave={() => { scenarioLeaveTimer.current = setTimeout(() => setScenarioHovered(false), 150) }}
+            >
+              <div className={`card cursor-default transition-shadow duration-200 ${scenarioHovered ? 'shadow-md' : ''} ${scenarioActive ? '!border-amber-300 dark:!border-amber-700' : ''}`}>
+                <div className="flex items-start py-0.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Scenarios</h2>
+                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${scenarioHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
+                      {scenarioActive ? (activeEvent ? activeEvent.name : 'Custom overrides active') : 'Shock Analysis'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {scenarioHovered && (
+                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl space-y-3" style={{ zIndex: 50, minWidth: 340 }}>
+                  {/* Header row */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Shock Analysis</h3>
+                      <button
+                        onClick={() => {
+                          const idx = Math.floor(Math.random() * HISTORICAL_EVENTS.length)
+                          const evt = HISTORICAL_EVENTS[idx]
+                          setSelectedEventId(evt.id)
+                          setScenarioSliders(s => ({ ...s, durationYears: evt.durationYears, returnDelta: evt.returnDelta, inflationDelta: evt.inflationDelta }))
+                          setScenarioActive(true)
+                        }}
+                        className="text-[10px] font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                      >
+                        Randomize
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setScenarioActive(a => !a)}
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
+                        scenarioActive
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      {scenarioActive ? 'Active' : 'Inactive'}
+                    </button>
+                  </div>
+
+                  {/* Overlay toggle */}
+                  <div className="flex items-center justify-between gap-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg px-3 py-2">
+                    <div>
+                      <p className="text-[11px] font-medium text-gray-700 dark:text-gray-300">Show as overlay</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500">Compare stressed vs base on the chart</p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setScenarioOverlay(v => !v); if (!scenarioActive) setScenarioActive(true) }}
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
+                        scenarioOverlay
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                      }`}
+                    >
+                      {scenarioOverlay ? 'On' : 'Off'}
+                    </button>
+                  </div>
+
+                  {/* Sliders */}
+                  <div className="space-y-2">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Return Rate Δ</span>
+                        <span className={`font-medium tabular-nums ${effectiveScenario.returnDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : effectiveScenario.returnDelta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                          {effectiveScenario.returnDelta > 0 ? '+' : ''}{Number(effectiveScenario.returnDelta).toFixed(1)}%/yr
+                        </span>
+                      </div>
+                      <input type="range" min="-30" max="10" step="1"
+                        value={activeEvent ? activeEvent.returnDelta : scenarioSliders.returnDelta}
+                        onChange={e => { setScenarioSliders(s => ({ ...s, returnDelta: parseFloat(e.target.value) })); setSelectedEventId(null) }}
+                        className="w-full accent-gray-900 dark:accent-white" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Inflation Δ</span>
+                        <span className={`font-medium tabular-nums ${effectiveScenario.inflationDelta > 0 ? 'text-red-500' : effectiveScenario.inflationDelta < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
+                          {effectiveScenario.inflationDelta > 0 ? '+' : ''}{Number(effectiveScenario.inflationDelta).toFixed(1)}%
+                        </span>
+                      </div>
+                      <input type="range" min="-10" max="15" step="0.5"
+                        value={activeEvent ? activeEvent.inflationDelta : scenarioSliders.inflationDelta}
+                        onChange={e => { setScenarioSliders(s => ({ ...s, inflationDelta: parseFloat(e.target.value) })); setSelectedEventId(null) }}
+                        className="w-full accent-gray-900 dark:accent-white" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Shock starts at age</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">{effectiveStartAge}</span>
+                          <label className="flex items-center gap-1 cursor-pointer select-none text-[10px] text-gray-400 dark:text-gray-500">
+                            <input
+                              type="checkbox"
+                              checked={scenarioLockRetirement}
+                              onChange={e => setScenarioLockRetirement(e.target.checked)}
+                              className="accent-amber-500 w-3 h-3"
+                            />
+                            Lock to retirement
+                          </label>
+                        </div>
+                      </div>
+                      <input type="range" min="65" max="90" step="1" value={scenarioSliders.startAge}
+                        disabled={scenarioLockRetirement}
+                        onChange={e => setScenarioSliders(s => ({ ...s, startAge: parseInt(e.target.value) }))}
+                        className={`w-full accent-gray-900 dark:accent-white ${scenarioLockRetirement ? 'opacity-30' : ''}`} />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Duration</span>
+                        <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">{effectiveScenario.durationYears} yr{effectiveScenario.durationYears > 1 ? 's' : ''}</span>
+                      </div>
+                      <input type="range" min="1" max="5" step="1"
+                        value={activeEvent ? activeEvent.durationYears : scenarioSliders.durationYears}
+                        onChange={e => { setScenarioSliders(s => ({ ...s, durationYears: parseInt(e.target.value) })); setSelectedEventId(null) }}
+                        className="w-full accent-gray-900 dark:accent-white" />
+                    </div>
+                  </div>
+
+                  {/* Scenarios */}
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Scenarios</p>
+                    <div className="flex flex-wrap gap-1">
+                      {HISTORICAL_EVENTS.map(ev => (
+                        <button
+                          key={ev.id}
+                          onClick={() => setSelectedEventId(id => id === ev.id ? null : ev.id)}
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-lg border transition-all ${
+                            selectedEventId === ev.id
+                              ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
+                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                          }`}
+                        >
+                          {ev.name} <span className="opacity-50">{ev.year}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Story */}
+                    {activeEvent && (
+                      <div className="bg-gray-50 dark:bg-gray-800/60 rounded-lg px-2.5 py-2 space-y-1">
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">{activeEvent.story}</p>
+                        <div className="flex items-center gap-3">
+                          <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.returnDelta < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            Returns {activeEvent.returnDelta > 0 ? '+' : ''}{activeEvent.returnDelta}%/yr
+                          </span>
+                          <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.inflationDelta > 0 ? 'text-amber-500' : activeEvent.inflationDelta < 0 ? 'text-blue-500' : 'text-gray-400'}`}>
+                            Inflation {activeEvent.inflationDelta > 0 ? '+' : ''}{activeEvent.inflationDelta}%
+                          </span>
+                          <span className="text-[10px] text-gray-400">{activeEvent.durationYears} yr{activeEvent.durationYears > 1 ? 's' : ''}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Reset */}
+                  <button
+                    onClick={() => { setScenarioSliders({ returnDelta: 0, inflationDelta: 0, startAge: 75, durationYears: 1 }); setSelectedEventId(null); setScenarioActive(false); setScenarioOverlay(false); setScenarioLockRetirement(false) }}
+                    className="w-full text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1 border border-gray-100 dark:border-gray-800 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+                  >
+                    Reset
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* What-If Analysis */}
+            {result && (
+              <WhatIfPanel
+                inputs={inputs}
+                strategy={strategy}
+                rrspDrawdown={rrspDrawdown}
+                cashOutflows={cashOutflows}
+                cashOutflowTaxRates={cashOutflowTaxRates}
+                retCashInflows={retCashInflows}
+                scenarioActive={scenarioActive}
+                effectiveScenario={effectiveScenario}
+                baseResult={{ ...result, mcProb: mcResult?.probabilityOfSuccess ?? null }}
+                mcActive={true}
+              />
+            )}
+
+            {/* Income Target */}
+            <IncomeTargetPanel
+              budget={budget}
+              inputs={inputs}
+              onOpenBudget={() => setActiveApp('budget')}
+              incomeTargetEnabled={incomeTargetEnabled}
+              onEnabledChange={(v) => updatePC({ incomeTargetEnabled: v })}
+              onAmountChange={(v) => updatePC({ incomeTargetAmount: v })}
+              strategyAmount={
+                strategy.strategyType !== 'fixedPct'
+                  ? (strategy.strategyParams.annualExpense ?? strategy.strategyParams.baseAmount ?? 0)
+                  : null
+              }
+            />
+
           </div>
 
           {/* Summary metrics */}
-          {result && <ResultsSummary summary={result.summary} />}
+          {result && <ResultsSummary
+            summary={result.summary}
+            rows={result.rows}
+            probabilityOfSuccess={mcResult?.probabilityOfSuccess ?? null}
+            pensionSplitSaving={viewPerson === 'combined' ? (allResults.combined?.summary?.totalPensionSplitSaving ?? null) : null}
+          />}
 
           {/* Tab switcher */}
           {result && (
-            <div className="flex gap-2 border-b border-slate-200 pb-0">
-              {TABS.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`px-4 py-2 text-sm font-medium rounded-t-md border-b-2 transition-colors ${
-                    activeTab === t.id
-                      ? 'border-brand-600 text-brand-700'
-                      : 'border-transparent text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {t.label}
-                </button>
+            <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit max-w-full overflow-x-auto">
+              {TABS.map((t, i) => (
+                <React.Fragment key={t.id}>
+                  {i > 0 && TABS[i - 1].group !== t.group && (
+                    <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-0.5 flex-shrink-0" />
+                  )}
+                  <button
+                    onClick={() => setActiveTab(t.id)}
+                    className={`px-3 sm:px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150 whitespace-nowrap ${
+                      activeTab === t.id
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                </React.Fragment>
               ))}
             </div>
           )}
 
-          {/* Charts */}
-          {result && activeTab === 'charts' && (
-            <div className="space-y-4">
-              <AccumulationChart
-                accounts={inputs.accounts}
-                currentAge={inputs.currentAge}
-                retirementAge={inputs.retirementAge}
-                inflation={inputs.inflation}
-                workingMarginalRate={inputs.workingMarginalRate}
-                nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
-              />
-              <BalanceChart rows={result.rows} accountMeta={result.accountMeta} inflation={inputs.inflation} retirementAge={inputs.retirementAge} />
-              <CashflowChart rows={result.rows} inflation={inputs.inflation} retirementAge={inputs.retirementAge} />
+          {/* Accumulation Portfolio chart */}
+          {result && activeTab === 'accChart' && (
+            <AccumulationChart
+              accounts={inputs.accounts}
+              currentAge={inputs.currentAge}
+              retirementAge={inputs.retirementAge}
+              inflation={inputs.inflation}
+              workingMarginalRate={inputs.workingMarginalRate}
+              nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
+              darkMode={darkMode}
+            />
+          )}
 
-              {/* Tax breakdown note */}
-              {result.summary.totalTaxPaid > 0 && (
-                <div className="card bg-amber-50 border-amber-200">
-                  <h3 className="text-sm font-semibold text-amber-800 mb-2">Tax Insights</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                    <div>
-                      <p className="text-amber-600">Total Federal Tax</p>
-                      <p className="font-bold text-amber-900">
-                        ${result.rows.reduce((s, r) => s + r.federalTax, 0).toLocaleString()}
-                      </p>
+          {/* Retirement Portfolio chart */}
+          {result && activeTab === 'retChart' && (
+            <div className="space-y-5">
+              <BalanceChart
+                rows={result.rows}
+                accountMeta={result.accountMeta}
+                inflation={inputs.inflation}
+                retirementAge={inputs.retirementAge}
+                rrifExhaustedAge={result.summary.rrifExhaustedAge}
+                darkMode={darkMode}
+                mcBands={mcResult?.bands ?? null}
+                probabilityOfSuccess={mcResult?.probabilityOfSuccess ?? null}
+                stressedRows={scenarioOverlayResult?.rows ?? null}
+                seqRiskLabel={scenarioActive && scenarioOverlay
+                  ? (activeEvent
+                      ? `${activeEvent.name}: ${effectiveScenario.returnDelta}%/yr × ${effectiveScenario.durationYears}yr`
+                      : `Stressed: ${effectiveScenario.returnDelta > 0 ? '+' : ''}${effectiveScenario.returnDelta}%/yr × ${effectiveScenario.durationYears}yr`)
+                  : null}
+              />
+              <WithdrawalRateChart rows={result.rows} retirementAge={inputs.retirementAge} inflation={inputs.inflation} darkMode={darkMode} />
+              <IncomeFloorChart rows={result.rows} retirementAge={inputs.retirementAge} inflation={inputs.inflation} darkMode={darkMode} />
+            </div>
+          )}
+
+          {/* Cashflow chart + tax insights */}
+          {result && activeTab === 'cashChart' && (
+            <div className="space-y-5">
+              <CashflowChart rows={result.rows} inflation={inputs.inflation} retirementAge={inputs.retirementAge} rrifExhaustedAge={result.summary.rrifExhaustedAge} darkMode={darkMode} />
+
+              <WithdrawalSourceChart rows={result.rows} retirementAge={inputs.retirementAge} darkMode={darkMode} />
+
+              <TaxBracketHeatmap
+                rows={result.rows}
+                retirementAge={inputs.retirementAge}
+                rrspDrawdown={rrspDrawdown}
+                onFixDrawdown={handleRrspDrawdownChange}
+                onFixSequence={seq => handleInputChange({ ...inputs, withdrawalSequence: seq })}
+                simParams={{
+                  ...inputs,
+                  cashOutflows,
+                  cashOutflowTaxRates,
+                  cashInflows:    retCashInflows,
+                  strategyType:   strategy.strategyType,
+                  strategyParams: { ...strategy.strategyParams, inflation: inputs.inflation / 100 },
+                  scenarioShock:  scenarioActive ? effectiveScenario : null,
+                }}
+              />
+
+              {/* OAS clawback warning */}
+              {result.rows.some(r => r.oasClawback > 0) && (
+                <div className="card !bg-red-50 !border-red-100 dark:!bg-red-950/30 dark:!border-red-900/50">
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-red-600 dark:text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
                     </div>
                     <div>
-                      <p className="text-amber-600">Total Provincial Tax</p>
-                      <p className="font-bold text-amber-900">
-                        ${result.rows.reduce((s, r) => s + r.provincialTax, 0).toLocaleString()}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-amber-600">Total OAS Clawback</p>
-                      <p className="font-bold text-amber-900">
-                        ${result.rows.reduce((s, r) => s + r.oasClawback, 0).toLocaleString()}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-amber-600">Avg Marginal Rate (yr 1)</p>
-                      <p className="font-bold text-amber-900">
-                        {result.rows[0] ? `${(result.rows[0].effectiveRate * 100).toFixed(1)}% eff.` : '—'}
+                      <p className="text-xs font-medium text-red-900 dark:text-red-300">OAS Clawback Warning</p>
+                      <p className="text-xs text-red-700/80 mt-1 dark:text-red-400/80">
+                        Your income in some years exceeds the clawback threshold (~$91K). Consider a lower-income strategy or TFSA-first withdrawals to reduce clawback.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
-
-              {/* OAS clawback warning */}
-              {result.rows.some(r => r.oasClawback > 0) && (
-                <div className="card bg-red-50 border-red-200 text-sm text-red-700">
-                  <strong>OAS Clawback Warning:</strong> Your income in some years exceeds the clawback
-                  threshold (~$91K). Consider a lower-income strategy or TFSA-first withdrawals to reduce clawback.
-                </div>
-              )}
             </div>
+          )}
+
+
+          {/* Estate tab */}
+          {result && activeTab === 'estate' && (
+            <EstateTab summary={result.summary} result={result} inputs={inputs} />
           )}
 
           {/* Retirement Cashflow table */}
@@ -252,7 +1512,11 @@ export default function App() {
             <DetailTable
               rows={result.rows}
               cashOutflows={cashOutflows}
+              cashOutflowTaxRates={cashOutflowTaxRates}
+              cashInflows={retCashInflows}
               onOutflowChange={handleOutflowChange}
+              onOutflowTaxRateChange={handleOutflowTaxRateChange}
+              onInflowChange={handleRetInflowChange}
             />
           )}
 
@@ -261,16 +1525,28 @@ export default function App() {
             <AccumulationTable
               rows={accRows}
               accounts={inputs.accounts}
+              accCashInflows={accCashInflows}
+              accCashOutflows={accCashOutflows}
+              accOutflowTaxRates={accOutflowTaxRates}
+              onInflowChange={handleAccInflowChange}
+              onOutflowChange={handleAccOutflowChange}
+              onOutflowTaxRateChange={handleAccOutflowTaxRateChange}
             />
           )}
 
-          {/* Disclaimer */}
-          <p className="text-xs text-slate-400 text-center pt-2">
+          <p className="text-[11px] text-gray-400 text-center pt-2">
             For educational purposes only. Not financial or tax advice.
             Tax rates are approximate 2025 values. Consult a qualified advisor.
           </p>
         </main>
+
+          </div>
+        )}
+
       </div>
+
     </div>
+
   )
 }
+

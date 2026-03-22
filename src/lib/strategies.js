@@ -3,6 +3,19 @@
 // context = { age, year, retirementYear, portfolioTotal, lastWithdrawal,
 //             inflation, initialPortfolio, initialWithdrawal, params }
 
+// ── RRIF minimum factors (mirrors tax.js) ───────────────────────────────────
+const RRIF_FACTORS = {
+  71: 0.0528, 72: 0.0540, 73: 0.0553, 74: 0.0567, 75: 0.0582,
+  76: 0.0598, 77: 0.0617, 78: 0.0636, 79: 0.0658, 80: 0.0682,
+  81: 0.0708, 82: 0.0738, 83: 0.0771, 84: 0.0808, 85: 0.0851,
+  86: 0.0899, 87: 0.0955, 88: 0.1021, 89: 0.1099, 90: 0.1192,
+  91: 0.1306, 92: 0.1449, 93: 0.1634, 94: 0.1879, 95: 0.2000,
+}
+function rrifMinimum(age, bal) {
+  if (age < 72 || bal <= 0) return 0
+  return bal * (RRIF_FACTORS[Math.min(age, 95)] || 0.2)
+}
+
 // ── 1. Fixed Percentage ───────────────────────────────────────────────────────
 export function fixedPercentageStrategy(params) {
   const { rate = 0.04 } = params
@@ -139,7 +152,13 @@ export function bucketStrategy(params) {
 // ── 5. Targeted Ending Balance ────────────────────────────────────────────────
 // Binary-searches for the constant real withdrawal that leaves `targetBalance`
 // at `targetAge`, then returns that amount inflation-adjusted each year.
-// The solve runs once on first call; subsequent calls return the solved amount.
+//
+// The solver mirrors the real simulation's 4-phase withdrawal logic:
+//   Phase 1: RRIF drawdown (minimums or accelerated drawdown)
+//   Phase 2: Remaining spending shortfall from other accounts
+//   Phase 3: RRIF surplus reinvested after tax (TFSA → non-reg)
+//   Phase 4: Non-Reg → TFSA annual transfer tax leakage
+// This ensures the solved withdrawal closely matches actual portfolio outcomes.
 export function targetedEndingBalanceStrategy(params, simOptions) {
   const {
     targetAge     = 90,
@@ -151,26 +170,105 @@ export function targetedEndingBalanceStrategy(params, simOptions) {
     retirementAge,
     portfolioTotal: initialPortfolio,
     annualReturn,
+    govIncomeByAge = {},
+    // Account-level detail for accurate RRIF/tax modelling
+    rrifBalance:    initRrif    = 0,
+    tfsaBalance:    initTfsa    = 0,
+    nonRegBalance:  initNonReg  = 0,
+    rrifReturnRate              = 0,   // decimal, e.g. 0.05
+    rrspDrawdown                = { type: 'none' },
+    estimatedTaxRate            = 0.25, // approximate marginal rate on RRIF draws
+    tfsaAnnualLimit             = 7000,
+    nonRegCostBasisFrac         = 0.6,  // ACB / balance ratio for non-reg
   } = simOptions
 
-  let solvedBase = null  // real (today's dollars) annual withdrawal
+  let solvedBase = null
 
   function simulate(baseWithdrawal) {
-    let balance = initialPortfolio
-    for (let age = retirementAge; age < targetAge; age++) {
-      balance *= (1 + annualReturn)
-      const yearsIn = age - retirementAge
-      const w = baseWithdrawal * Math.pow(1 + inflation, yearsIn)
-      balance -= w
-      if (balance < 0) return -1
+    // Track three pools separately to model RRIF minimums + surplus tax leakage
+    let rrif   = initRrif
+    let tfsa   = initTfsa
+    let nonReg = initNonReg
+    const rrifR   = rrifReturnRate || annualReturn
+    const otherR  = annualReturn
+
+    for (let age = retirementAge; age <= targetAge; age++) {
+      // ── Growth ──
+      rrif   *= (1 + rrifR)
+      tfsa   *= (1 + otherR)
+      nonReg *= (1 + otherR)
+
+      const portfolio = rrif + tfsa + nonReg
+      const yearsIn   = age - retirementAge
+      const totalSpend = baseWithdrawal * Math.pow(1 + inflation, yearsIn)
+      const govInc     = govIncomeByAge[age] ?? 0
+      const spendFromPortfolio = Math.max(0, totalSpend - govInc)
+
+      // ── Phase 1: RRIF drawdown ──
+      const rrifMin = rrifMinimum(age, rrif)
+      let rrifDraw  = rrifMin
+      if (rrspDrawdown.type === 'targetAge') {
+        const n = (rrspDrawdown.targetAge || retirementAge) - age + 1
+        if (n > 0 && rrif > 0) {
+          const pmt = rrifR > 0
+            ? rrif * rrifR / (1 - Math.pow(1 + rrifR, -n))
+            : rrif / n
+          rrifDraw = Math.max(rrifMin, pmt)
+        }
+      } else if (rrspDrawdown.type === 'fixedAmount') {
+        rrifDraw = Math.max(rrifMin, rrspDrawdown.fixedAmount || 0)
+      } else if (rrspDrawdown.type === 'targetBracket') {
+        const bracketTarget = Math.max(0, (rrspDrawdown.targetAnnualIncome || 0) - govInc)
+        rrifDraw = Math.max(rrifMin, bracketTarget)
+      }
+      rrifDraw = Math.min(rrifDraw, rrif) // can't draw more than balance
+      rrif -= rrifDraw
+
+      // ── Phase 2: Spending shortfall from non-reg then TFSA ──
+      const shortfall = Math.max(0, spendFromPortfolio - rrifDraw)
+      const fromNonReg = Math.min(nonReg, shortfall)
+      nonReg -= fromNonReg
+      const fromTfsa = Math.min(tfsa, Math.max(0, shortfall - fromNonReg))
+      tfsa -= fromTfsa
+      // If still short, draw extra from RRIF
+      const fromRrifExtra = Math.min(rrif, Math.max(0, shortfall - fromNonReg - fromTfsa))
+      rrif -= fromRrifExtra
+
+      // ── Phase 3: RRIF surplus reinvestment (after tax) ──
+      const totalRrifDraw  = rrifDraw + fromRrifExtra
+      const rrifSurplus    = Math.max(0, govInc + totalRrifDraw - totalSpend)
+      if (rrifSurplus > 0) {
+        const afterTax = rrifSurplus * (1 - estimatedTaxRate)
+        // Deposit surplus to TFSA first (up to limit), rest to non-reg
+        const toTfsa   = Math.min(afterTax, tfsaAnnualLimit)
+        const toNonReg = afterTax - toTfsa
+        tfsa   += toTfsa
+        nonReg += toNonReg
+      }
+
+      // ── Phase 4: Non-Reg → TFSA transfer tax leakage ──
+      // Each year, transferring up to TFSA limit from non-reg triggers
+      // capital gains tax, resulting in a small portfolio loss.
+      const tfsaRoom = Math.max(0, tfsaAnnualLimit - (rrifSurplus > 0 ? Math.min(rrifSurplus * (1 - estimatedTaxRate), tfsaAnnualLimit) : 0))
+      if (tfsaRoom > 0 && nonReg > 0) {
+        const xfer     = Math.min(nonReg, tfsaRoom)
+        const gainFrac = Math.max(0, 1 - nonRegCostBasisFrac)
+        const taxOnXfer = xfer * gainFrac * 0.5 * estimatedTaxRate // 50% inclusion rate
+        const netXfer   = Math.max(0, xfer - taxOnXfer)
+        nonReg -= xfer
+        tfsa   += netXfer
+        // Tax leakage = taxOnXfer (portfolio shrinks by this amount)
+      }
+
+      const total = rrif + tfsa + nonReg
+      if (total < -1) return -1
     }
-    return balance
+    return rrif + tfsa + nonReg
   }
 
-  // Binary search
   function solve() {
     let lo = 0
-    let hi = initialPortfolio * 0.30   // max 30% per year
+    let hi = initialPortfolio * 0.50
     for (let i = 0; i < 80; i++) {
       const mid = (lo + hi) / 2
       const end = simulate(mid)

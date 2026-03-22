@@ -5,8 +5,8 @@ import {
 } from 'recharts'
 
 const PALETTE = [
-  '#0ea5e9', '#22c55e', '#f59e0b', '#8b5cf6',
-  '#ef4444', '#ec4899', '#06b6d4', '#84cc16',
+  '#16a34a', '#2563eb', '#d97706', '#7c3aed',
+  '#dc2626', '#0891b2', '#c2410c', '#65a30d',
 ]
 
 function fmtY(v) {
@@ -19,14 +19,14 @@ function CustomTooltip({ active, payload, label, retirementAge, real }) {
   if (!active || !payload?.length) return null
   const total = payload.reduce((s, p) => s + (p.value || 0), 0)
   return (
-    <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-xs">
-      <p className="font-semibold text-slate-700 mb-1">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-xs dark:bg-gray-800 dark:border-gray-700">
+      <p className="font-semibold text-gray-700 mb-1 dark:text-gray-200">
         Age {label}{label === retirementAge ? ' — Retirement' : ''}{real ? ' (real $)' : ''}
       </p>
       {payload.map(p => (
         <p key={p.dataKey} style={{ color: p.color }}>{p.name}: {fmtY(p.value)}</p>
       ))}
-      <p className="text-slate-500 mt-1 font-medium border-t border-slate-100 pt-1">
+      <p className="text-gray-500 mt-1 font-medium border-t border-gray-100 pt-1 dark:text-gray-400 dark:border-gray-700">
         Total: {fmtY(total)}
       </p>
     </div>
@@ -59,7 +59,7 @@ function buildAccData(accounts, currentAge, retirementAge, inflation, real, work
   return rows
 }
 
-export default function AccumulationChart({ accounts, currentAge, retirementAge, inflation = 2.5, workingMarginalRate = 40, nonRegOrdinaryPct = 0 }) {
+export default function AccumulationChart({ accounts, currentAge, retirementAge, inflation = 2.5, workingMarginalRate = 40, nonRegOrdinaryPct = 0, darkMode = false }) {
   const [real, setReal] = useState(false)
 
   if (!accounts?.length || currentAge >= retirementAge) return null
@@ -84,21 +84,24 @@ export default function AccumulationChart({ accounts, currentAge, retirementAge,
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Accumulation Phase — Age {currentAge} to {retirementAge}
+        <h3
+          className="text-xs font-semibold text-gray-900 dark:text-gray-100 cursor-default"
+          title={`Age ${currentAge} to ${retirementAge}`}
+        >
+          Accumulation Portfolio
         </h3>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-brand-700 font-semibold bg-brand-50 border border-brand-100 px-2 py-1 rounded-md">
+          <span className="text-xs text-brand-700 font-semibold bg-brand-50 px-2.5 py-1 rounded-lg dark:text-brand-300 dark:bg-brand-900/20">
             At retirement: {fmtY(Math.round(displayTotal))}{real ? ' real' : ''}
           </span>
-          <div className="flex items-center gap-1 bg-slate-100 rounded-md p-0.5 text-xs">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 text-xs dark:bg-gray-800">
             <button
               onClick={() => setReal(false)}
-              className={`px-2.5 py-1 rounded transition-colors ${!real ? 'bg-white shadow text-slate-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`px-2.5 py-1 rounded-md transition-colors ${!real ? 'bg-white shadow-sm text-gray-900 font-medium dark:bg-gray-700 dark:text-gray-100' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
             >Nominal</button>
             <button
               onClick={() => setReal(true)}
-              className={`px-2.5 py-1 rounded transition-colors ${real ? 'bg-white shadow text-slate-700 font-medium' : 'text-slate-500 hover:text-slate-700'}`}
+              className={`px-2.5 py-1 rounded-md transition-colors ${real ? 'bg-white shadow-sm text-gray-900 font-medium dark:bg-gray-700 dark:text-gray-100' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'}`}
             >Real</button>
           </div>
         </div>
@@ -113,7 +116,7 @@ export default function AccumulationChart({ accounts, currentAge, retirementAge,
               </linearGradient>
             ))}
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+          <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#f3f4f6'} />
           <XAxis
             dataKey="age"
             tick={{ fontSize: 11 }}
@@ -124,9 +127,9 @@ export default function AccumulationChart({ accounts, currentAge, retirementAge,
           <Legend wrapperStyle={{ fontSize: 12 }} />
           <ReferenceLine
             x={retirementAge}
-            stroke="#64748b"
+            stroke="#9ca3af"
             strokeDasharray="4 3"
-            label={{ value: 'Retirement', position: 'insideTopRight', fontSize: 10, fill: '#64748b' }}
+            label={{ value: 'Retirement', position: 'insideTopRight', fontSize: 10, fill: '#9ca3af' }}
           />
           {accounts.map((acc, i) => (
             <Area

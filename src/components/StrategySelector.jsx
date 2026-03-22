@@ -27,7 +27,7 @@ const STRATEGIES = [
   },
   {
     id: 'bucket',
-    label: 'Bucket Strategy',
+    label: 'Bucket',
     desc: 'Cash / Bonds / Equity buckets with automatic annual refill.',
     detail: 'Divides the portfolio into three buckets by time horizon. Cash covers near-term expenses, bonds cover the medium term, and equities provide long-term growth. Equities refill bonds; bonds refill cash each year.',
     pros: ['Psychologically comforting', 'Reduces sequence-of-returns risk', 'Clear mental model'],
@@ -46,16 +46,16 @@ const STRATEGIES = [
 function InfoTooltip({ strategy }) {
   return (
     <div className="relative group inline-flex items-center ml-1.5">
-      <span className="cursor-help text-slate-400 hover:text-brand-500 text-sm leading-none select-none">ⓘ</span>
-      <div className="absolute left-5 top-0 z-50 hidden group-hover:block w-72 bg-white border border-slate-200 rounded-lg shadow-xl p-3 text-xs pointer-events-none">
-        <p className="text-slate-600 mb-2">{strategy.detail}</p>
-        <p className="font-semibold text-green-700 mb-1">Pros</p>
+      <span className="cursor-help text-gray-300 hover:text-gray-500 text-sm leading-none select-none dark:text-gray-600 dark:hover:text-gray-400">ⓘ</span>
+      <div className="absolute left-5 top-0 z-50 hidden group-hover:block w-72 bg-white border border-gray-200 rounded-xl shadow-lg p-3.5 text-xs pointer-events-none dark:bg-gray-800 dark:border-gray-700">
+        <p className="text-gray-600 mb-2.5 leading-relaxed dark:text-gray-300">{strategy.detail}</p>
+        <p className="font-semibold text-brand-700 mb-1 dark:text-brand-400">Pros</p>
         {strategy.pros.map(p => (
-          <p key={p} className="text-slate-600 mb-0.5">✓ {p}</p>
+          <p key={p} className="text-gray-600 mb-0.5 dark:text-gray-300">✓ {p}</p>
         ))}
-        <p className="font-semibold text-red-600 mt-2 mb-1">Cons</p>
+        <p className="font-semibold text-red-600 mt-2.5 mb-1 dark:text-red-400">Cons</p>
         {strategy.cons.map(c => (
-          <p key={c} className="text-slate-600 mb-0.5">✗ {c}</p>
+          <p key={c} className="text-gray-600 mb-0.5 dark:text-gray-300">✗ {c}</p>
         ))}
       </div>
     </div>
@@ -65,7 +65,7 @@ function InfoTooltip({ strategy }) {
 function ParamRow({ label, children }) {
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="w-40 text-slate-500 shrink-0">{label}</span>
+      <span className="w-40 text-gray-500 shrink-0 dark:text-gray-400">{label}</span>
       {children}
     </div>
   )
@@ -104,17 +104,17 @@ function NumParam({ value, onChange, min, max, step = 0.1, prefix, suffix }) {
 
   return (
     <div className="relative flex items-center">
-      {prefix && <span className="absolute left-2 text-slate-400 text-xs">{prefix}</span>}
+      {prefix && <span className="absolute left-2 text-gray-400 text-xs">{prefix}</span>}
       <input
         type="text"
         inputMode={isPct ? 'decimal' : 'numeric'}
-        className={`input-field w-24 text-xs py-1 ${prefix ? 'pl-5' : ''} ${suffix ? 'pr-6' : ''}`}
+        className={`input-field w-24 text-xs py-1.5 ${prefix ? 'pl-5' : ''} ${suffix ? 'pr-6' : ''}`}
         value={local}
         onChange={handleChange}
         onFocus={handleFocus}
         onBlur={handleBlur}
       />
-      {suffix && <span className="absolute right-2 text-slate-400 text-xs">{suffix}</span>}
+      {suffix && <span className="absolute right-2 text-gray-400 text-xs">{suffix}</span>}
     </div>
   )
 }
@@ -127,7 +127,7 @@ export default function StrategySelector({ strategyType, strategyParams, onChang
   return (
     <div>
       {/* Tab buttons */}
-      <div className="flex flex-wrap gap-1 mb-2 min-h-[60px] content-start">
+      <div className="flex flex-wrap gap-1 mb-3 min-h-[60px] content-start">
         {STRATEGIES.map(s => (
           <button
             key={s.id}
@@ -140,17 +140,17 @@ export default function StrategySelector({ strategyType, strategyParams, onChang
       </div>
 
       {/* Description + info icon */}
-      <div className="flex items-start mb-2 min-h-[32px]">
+      <div className="flex items-start mb-3 min-h-[32px]">
         {active && (
           <>
-            <p className="text-xs text-slate-500 italic">{active.desc}</p>
+            <p className="text-xs text-gray-400 italic dark:text-gray-500">{active.desc}</p>
             <InfoTooltip strategy={active} />
           </>
         )}
       </div>
 
       {/* Strategy-specific parameters */}
-      <div className="space-y-1.5 bg-slate-50 border border-slate-200 rounded-lg p-2">
+      <div className="space-y-2 bg-gray-50 rounded-xl p-3 dark:bg-gray-800/50">
 
         {strategyType === 'fixedPct' && (
           <ParamRow label="Withdrawal Rate">
