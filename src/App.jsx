@@ -6,7 +6,10 @@ import InputPanel         from './components/InputPanel.jsx'
 import StrategySelector   from './components/StrategySelector.jsx'
 import RrspDrawdown       from './components/RrspDrawdown.jsx'
 import ResultsSummary     from './components/ResultsSummary.jsx'
-import AccumulationChart  from './components/AccumulationChart.jsx'
+import AccumulationChart          from './components/AccumulationChart.jsx'
+import AccumulationGrowthBar      from './components/AccumulationGrowthBar.jsx'
+import AccumulationAllocationChart from './components/AccumulationAllocationChart.jsx'
+import ContributionRateChart      from './components/ContributionRateChart.jsx'
 import AccumulationTable  from './components/AccumulationTable.jsx'
 import BalanceChart       from './components/BalanceChart.jsx'
 import WithdrawalRateChart from './components/WithdrawalRateChart.jsx'
@@ -19,6 +22,8 @@ import WhatIfPanel        from './components/WhatIfPanel.jsx'
 import SequencingAdvisor  from './components/SequencingAdvisor.jsx'
 import EstateTab          from './components/EstateTab.jsx'
 import IncomeTargetPanel  from './components/IncomeTargetPanel.jsx'
+import AccountsApp        from './components/AccountsApp.jsx'
+import ExpenseTracker     from './components/ExpenseTracker.jsx'
 import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
 import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
@@ -55,6 +60,7 @@ const DEFAULT_INPUTS = {
   withdrawalSequence:  ['nonreg', 'tfsa', 'rrif'],
   workingMarginalRate: 40,
   nonRegOrdinaryPct:   0,
+  annualSalary:        0,
   tfsaIndexedToInflation: true,
   dbSalaryGrowthEnabled: false,
   dbSalaryGrowthRate:    2,
@@ -109,6 +115,7 @@ function makeDefaultPersonConfig() {
     withdrawalSequence:  [...DEFAULT_INPUTS.withdrawalSequence],
     incomeTargetEnabled: false,
     incomeTargetAmount:  0,
+    incomeTargetPhases:  null,
     cashOutflows:        {},
     cashOutflowTaxRates: {},
     retCashInflows:      {},
@@ -200,6 +207,9 @@ const DEFAULT_BUDGET = {
     { id: 'ia2', name: 'TFSA',           balance: 0, rate: 6 },
     { id: 'ia3', name: 'Non-Registered', balance: 0, rate: 6 },
   ],
+  debtAccounts: [
+    { id: 'da1', name: 'Credit Card', balance: 0, rate: 19.99, debtType: 'credit_card', minPayment: 0 },
+  ],
   goals: [],
 }
 
@@ -224,7 +234,7 @@ function mergeInputs(saved) {
 const BUDGET_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'income',    label: 'Income'    },
-  { id: 'expenses',  label: 'Expenses'  },
+  { id: 'plan',      label: 'Plan'      },
   { id: 'capex',     label: 'CapEx'     },
   { id: 'goals',     label: 'Goals'     },
 ]
@@ -376,6 +386,8 @@ export default function App() {
   const [rrspHovered,          setRrspHovered]          = useState(false)
   const [activeApp,            setActiveApp]            = useState('retirement')
   const [budgetTab,            setBudgetTab]            = useState('dashboard')
+  const [demoMode,             setDemoMode]             = useState(false)
+  const [focusAccountId,       setFocusAccountId]       = useState(null)
   const [cloudSaveStatus,      setCloudSaveStatus]      = useState('idle') // 'idle' | 'saving' | 'saved' | 'error'
   const cloudSaveTimer                                  = useRef(null)
   const [scenarioHovered,      setScenarioHovered]      = useState(false)
@@ -604,6 +616,7 @@ export default function App() {
         rrspDrawdown:        pPC.rrspDrawdown,
         withdrawalSequence:  pPC.withdrawalSequence ?? inputs.withdrawalSequence,
         scenarioShock:       (scenarioActive && !scenarioOverlay) ? effectiveScenario : null,
+        incomeTargetPhases:  pPC.incomeTargetEnabled && pPC.incomeTargetPhases?.length > 0 ? pPC.incomeTargetPhases : null,
       }
 
       const primary = runSimulation(simParams)
@@ -866,6 +879,32 @@ export default function App() {
           B
         </button>
 
+        {/* T — Transactions */}
+        <button
+          onClick={() => setActiveApp('tracking')}
+          title="Transactions"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+            ${activeApp === 'tracking'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          T
+        </button>
+
+        {/* A — Accounts app */}
+        <button
+          onClick={() => setActiveApp('accounts')}
+          title="Accounts"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+            ${activeApp === 'accounts'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          A
+        </button>
+
       </div>
 
       {/* ── App container (rounded border) ── */}
@@ -882,6 +921,16 @@ export default function App() {
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Retirement Planner</h1>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Portfolio & Income Simulator</p>
+                  </>
+                ) : activeApp === 'tracking' ? (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Transactions</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Monthly Actuals</p>
+                  </>
+                ) : activeApp === 'accounts' ? (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Accounts</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Retirement, Cash & Investments</p>
                   </>
                 ) : (
                   <>
@@ -967,6 +1016,16 @@ export default function App() {
                   onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
                 />
               )}
+
+              {/* DEMO mode toggle */}
+              <div className="flex items-center gap-1.5 select-none px-1">
+                <span className={`text-[9px] font-semibold tracking-wide transition-colors ${demoMode ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`}>DEMO</span>
+                <button type="button" onClick={() => setDemoMode(v => !v)}
+                  title="Toggle demo data"
+                  className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors focus:outline-none ${demoMode ? 'bg-amber-400' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                  <span className={`inline-block h-2.5 w-2.5 mt-[1px] rounded-full bg-white shadow transform transition-transform ${demoMode ? 'translate-x-2.5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
 
               {/* Reset button */}
               <button
@@ -1088,7 +1147,24 @@ export default function App() {
 
           /* Budget app */
           <BudgetApp budget={budget} onChange={setBudget} darkMode={darkMode} tab={budgetTab} onTabChange={setBudgetTab}
-            lifeExpectancy={inputs.lifeExpectancy} currentAge={inputs.currentAge} retirementInputs={inputs} />
+            lifeExpectancy={inputs.lifeExpectancy} currentAge={inputs.currentAge} retirementInputs={inputs}
+            onOpenAccounts={() => setActiveApp('accounts')} demoMode={demoMode} />
+
+        ) : activeApp === 'tracking' ? (
+
+          /* Expense Tracker — standalone, no Budget App chrome */
+          <ExpenseTracker budget={budget} onBudgetChange={setBudget}
+            onGoToAccounts={id => { setFocusAccountId(id); setActiveApp('accounts') }}
+            demoMode={demoMode} />
+
+        ) : activeApp === 'accounts' ? (
+
+          /* Accounts app */
+          <AccountsApp
+            inputs={inputs} onInputsChange={handleInputChange}
+            budget={budget} onBudgetChange={setBudget}
+            darkMode={darkMode}
+            focusAccountId={focusAccountId} demoMode={demoMode} />
 
         ) : (
 
@@ -1097,7 +1173,7 @@ export default function App() {
 
             {/* ── Inputs sidebar ── */}
             <aside className="shrink-0 hidden lg:flex overflow-y-auto">
-              <InputPanel inputs={inputs} onChange={handleInputChange} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => setActiveApp('accounts')} />
             </aside>
 
             {/* ── Main content ── */}
@@ -1105,302 +1181,295 @@ export default function App() {
 
 
           {/* Strategy cards — overlay on hover */}
-          <div className="flex gap-3 flex-wrap">
+          <div className="flex flex-col">
 
-            {/* Drawdown Strategy */}
-            <div
-              className="relative w-52"
-              style={{ zIndex: strategyHovered ? 50 : 1 }}
-              onMouseEnter={() => { clearTimeout(strategyLeaveTimer.current); setStrategyHovered(true) }}
-              onMouseLeave={() => { strategyLeaveTimer.current = setTimeout(() => setStrategyHovered(false), 150) }}
-            >
-              <div className={`card cursor-default transition-shadow duration-200 ${strategyHovered ? 'shadow-md' : ''} ${incomeTargetEnabled ? '!border-blue-300 dark:!border-blue-700' : ''}`}>
-                <div className="flex items-start py-0.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Retirement Withdrawals</h2>
-                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${strategyHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
+            {/* Top row: Retirement Withdrawals | RRSP Drawdown | Withdrawal Sequence */}
+            <div className="flex gap-3 flex-wrap">
+
+              {/* Retirement Withdrawals */}
+              <div
+                className="relative w-52"
+                style={{ zIndex: strategyHovered ? 50 : 1 }}
+                onMouseEnter={() => { clearTimeout(strategyLeaveTimer.current); setStrategyHovered(true) }}
+                onMouseLeave={() => { strategyLeaveTimer.current = setTimeout(() => setStrategyHovered(false), 150) }}
+              >
+                <div className={`card cursor-default transition-shadow duration-200 rounded-b-none border-b-0 ${strategyHovered ? 'shadow-md' : ''} ${incomeTargetEnabled ? '!border-blue-300 dark:!border-blue-700' : ''}`}>
+                  <div className="flex items-start py-0.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Retirement Withdrawals</h2>
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${strategyHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      {incomeTargetEnabled && incomeTargetAmount > 0 ? (
+                        <p className="text-[11px] text-blue-500 dark:text-blue-400 mt-0.5 whitespace-nowrap font-medium">
+                          ⚡ Income Target: {incomeTargetAmount >= 1000 ? `$${(incomeTargetAmount / 1000).toFixed(0)}K` : `$${incomeTargetAmount}`}/yr
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
+                          {{ fixedPct: 'Fixed %', fixedDollar: 'Fixed $', guardrails: 'Guardrails', bucket: 'Bucket', targeted: 'Target Estate' }[strategy.strategyType] ?? strategy.strategyType}
+                        </p>
+                      )}
                     </div>
-                    {incomeTargetEnabled && incomeTargetAmount > 0 ? (
-                      <p className="text-[11px] text-blue-500 dark:text-blue-400 mt-0.5 whitespace-nowrap font-medium">
-                        ⚡ Income Target: {incomeTargetAmount >= 1000 ? `$${(incomeTargetAmount / 1000).toFixed(0)}K` : `$${incomeTargetAmount}`}/yr
-                      </p>
-                    ) : (
+                  </div>
+                </div>
+                {strategyHovered && (
+                  <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 320 }}>
+                    <StrategySelector
+                      strategyType={strategy.strategyType}
+                      strategyParams={strategy.strategyParams}
+                      onChange={handleStrategyChange}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* RRSP / RRIF Drawdown */}
+              <div
+                className="relative w-52"
+                style={{ zIndex: rrspHovered ? 50 : 1 }}
+                onMouseEnter={() => { clearTimeout(rrspLeaveTimer.current); setRrspHovered(true) }}
+                onMouseLeave={() => { rrspLeaveTimer.current = setTimeout(() => setRrspHovered(false), 150) }}
+              >
+                <div className={`card cursor-default transition-shadow duration-200 ${rrspHovered ? 'shadow-md' : ''}`}>
+                  <div className="flex items-start py-0.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">RRSP Drawdown</h2>
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${rrspHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </div>
                       <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
-                        {{ fixedPct: 'Fixed %', fixedDollar: 'Fixed $', guardrails: 'Guardrails', bucket: 'Bucket', targeted: 'Target Estate' }[strategy.strategyType] ?? strategy.strategyType}
+                        {{ none: 'None', fixedAmount: 'Fixed $', targetAge: 'Depletion Age', targetBracket: 'Target Bracket' }[rrspDrawdown.type] ?? rrspDrawdown.type}
                       </p>
-                    )}
+                    </div>
                   </div>
                 </div>
+                {rrspHovered && (
+                  <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 420 }}>
+                    <RrspDrawdown
+                      rrspDrawdown={rrspDrawdown}
+                      onChange={handleRrspDrawdownChange}
+                      comparison={rrspComparison}
+                    />
+                  </div>
+                )}
               </div>
-              {strategyHovered && (
-                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 320 }}>
-                  <StrategySelector
-                    strategyType={strategy.strategyType}
-                    strategyParams={strategy.strategyParams}
-                    onChange={handleStrategyChange}
-                  />
-                </div>
+
+              {/* Withdrawal Sequence */}
+              {result && (
+                <SequencingAdvisor
+                  inputs={{ ...inputs, withdrawalSequence: pc.withdrawalSequence ?? inputs.withdrawalSequence }}
+                  strategy={strategy}
+                  rrspDrawdown={rrspDrawdown}
+                  cashOutflows={cashOutflows}
+                  cashOutflowTaxRates={cashOutflowTaxRates}
+                  retCashInflows={retCashInflows}
+                  scenarioActive={scenarioActive}
+                  effectiveScenario={effectiveScenario}
+                  onApply={seq => updatePC({ withdrawalSequence: seq })}
+                />
               )}
+
             </div>
 
-            {/* RRSP / RRIF Drawdown */}
-            <div
-              className="relative w-52"
-              style={{ zIndex: rrspHovered ? 50 : 1 }}
-              onMouseEnter={() => { clearTimeout(rrspLeaveTimer.current); setRrspHovered(true) }}
-              onMouseLeave={() => { rrspLeaveTimer.current = setTimeout(() => setRrspHovered(false), 150) }}
-            >
-              <div className={`card cursor-default transition-shadow duration-200 ${rrspHovered ? 'shadow-md' : ''}`}>
-                <div className="flex items-start py-0.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">RRSP Drawdown</h2>
-                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${rrspHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
-                      {{ none: 'None', fixedAmount: 'Fixed $', targetAge: 'Depletion Age', targetBracket: 'Target Bracket' }[rrspDrawdown.type] ?? rrspDrawdown.type}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {rrspHovered && (
-                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl" style={{ zIndex: 50, minWidth: 420 }}>
-                  <RrspDrawdown
-                    rrspDrawdown={rrspDrawdown}
-                    onChange={handleRrspDrawdownChange}
-                    comparison={rrspComparison}
-                  />
-                </div>
-              )}
+            {/* Connector line */}
+            <div className={`w-52 flex items-center border-l border-r px-3 ${incomeTargetEnabled ? 'border-blue-300 dark:border-blue-700' : 'border-gray-200 dark:border-gray-700'}`}>
+              <div className={`flex-1 border-t border-dashed ${incomeTargetEnabled ? 'border-blue-200 dark:border-blue-800' : 'border-gray-200 dark:border-gray-700'}`} />
+              <span className={`text-[9px] px-1.5 font-medium ${incomeTargetEnabled ? 'text-blue-400 dark:text-blue-500' : 'text-gray-300 dark:text-gray-600'}`}>spend target</span>
+              <div className={`flex-1 border-t border-dashed ${incomeTargetEnabled ? 'border-blue-200 dark:border-blue-800' : 'border-gray-200 dark:border-gray-700'}`} />
             </div>
 
-            {/* Withdrawal Sequence */}
-            {result && (
-              <SequencingAdvisor
-                inputs={{ ...inputs, withdrawalSequence: pc.withdrawalSequence ?? inputs.withdrawalSequence }}
-                strategy={strategy}
-                rrspDrawdown={rrspDrawdown}
-                cashOutflows={cashOutflows}
-                cashOutflowTaxRates={cashOutflowTaxRates}
-                retCashInflows={retCashInflows}
-                scenarioActive={scenarioActive}
-                effectiveScenario={effectiveScenario}
-                onApply={seq => updatePC({ withdrawalSequence: seq })}
-              />
-            )}
+            {/* Bottom row: Income Target + Scenarios + What-If */}
+            <div className="flex gap-3 flex-wrap">
 
-            {/* Scenario Tester */}
-            <div
-              className="relative w-52"
-              style={{ zIndex: scenarioHovered ? 50 : 1 }}
-              onMouseEnter={() => { clearTimeout(scenarioLeaveTimer.current); setScenarioHovered(true) }}
-              onMouseLeave={() => { scenarioLeaveTimer.current = setTimeout(() => setScenarioHovered(false), 150) }}
-            >
-              <div className={`card cursor-default transition-shadow duration-200 ${scenarioHovered ? 'shadow-md' : ''} ${scenarioActive ? '!border-amber-300 dark:!border-amber-700' : ''}`}>
-                <div className="flex items-start py-0.5">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Scenarios</h2>
-                      <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${scenarioHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
-                      {scenarioActive ? (activeEvent ? activeEvent.name : 'Custom overrides active') : 'Shock Analysis'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {scenarioHovered && (
-                <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl space-y-3" style={{ zIndex: 50, minWidth: 340 }}>
-                  {/* Header row */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Shock Analysis</h3>
-                      <button
-                        onClick={() => {
-                          const idx = Math.floor(Math.random() * HISTORICAL_EVENTS.length)
-                          const evt = HISTORICAL_EVENTS[idx]
-                          setSelectedEventId(evt.id)
-                          setScenarioSliders(s => ({ ...s, durationYears: evt.durationYears, returnDelta: evt.returnDelta, inflationDelta: evt.inflationDelta }))
-                          setScenarioActive(true)
-                        }}
-                        className="text-[10px] font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                      >
-                        Randomize
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => setScenarioActive(a => !a)}
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
-                        scenarioActive
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      {scenarioActive ? 'Active' : 'Inactive'}
-                    </button>
-                  </div>
+                <IncomeTargetPanel
+                  budget={budget}
+                  inputs={inputs}
+                  onOpenBudget={() => setActiveApp('budget')}
+                  incomeTargetEnabled={incomeTargetEnabled}
+                  onEnabledChange={(v) => updatePC({ incomeTargetEnabled: v })}
+                  onAmountChange={(v) => updatePC({ incomeTargetAmount: v })}
+                  onPhasesChange={(phases) => updatePC({ incomeTargetPhases: phases })}
+                  strategyAmount={
+                    strategy.strategyType !== 'fixedPct'
+                      ? (strategy.strategyParams.annualExpense ?? strategy.strategyParams.baseAmount ?? 0)
+                      : null
+                  }
+                  connectedTop
+                />
 
-                  {/* Overlay toggle */}
-                  <div className="flex items-center justify-between gap-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg px-3 py-2">
-                    <div>
-                      <p className="text-[11px] font-medium text-gray-700 dark:text-gray-300">Show as overlay</p>
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500">Compare stressed vs base on the chart</p>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setScenarioOverlay(v => !v); if (!scenarioActive) setScenarioActive(true) }}
-                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
-                        scenarioOverlay
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
-                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-                      }`}
-                    >
-                      {scenarioOverlay ? 'On' : 'Off'}
-                    </button>
-                  </div>
-
-                  {/* Sliders */}
-                  <div className="space-y-2">
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500 dark:text-gray-400">Return Rate Δ</span>
-                        <span className={`font-medium tabular-nums ${effectiveScenario.returnDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : effectiveScenario.returnDelta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                          {effectiveScenario.returnDelta > 0 ? '+' : ''}{Number(effectiveScenario.returnDelta).toFixed(1)}%/yr
-                        </span>
-                      </div>
-                      <input type="range" min="-30" max="10" step="1"
-                        value={activeEvent ? activeEvent.returnDelta : scenarioSliders.returnDelta}
-                        onChange={e => { setScenarioSliders(s => ({ ...s, returnDelta: parseFloat(e.target.value) })); setSelectedEventId(null) }}
-                        className="w-full accent-gray-900 dark:accent-white" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500 dark:text-gray-400">Inflation Δ</span>
-                        <span className={`font-medium tabular-nums ${effectiveScenario.inflationDelta > 0 ? 'text-red-500' : effectiveScenario.inflationDelta < 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>
-                          {effectiveScenario.inflationDelta > 0 ? '+' : ''}{Number(effectiveScenario.inflationDelta).toFixed(1)}%
-                        </span>
-                      </div>
-                      <input type="range" min="-10" max="15" step="0.5"
-                        value={activeEvent ? activeEvent.inflationDelta : scenarioSliders.inflationDelta}
-                        onChange={e => { setScenarioSliders(s => ({ ...s, inflationDelta: parseFloat(e.target.value) })); setSelectedEventId(null) }}
-                        className="w-full accent-gray-900 dark:accent-white" />
-                    </div>
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500 dark:text-gray-400">Shock starts at age</span>
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">{effectiveStartAge}</span>
-                          <label className="flex items-center gap-1 cursor-pointer select-none text-[10px] text-gray-400 dark:text-gray-500">
-                            <input
-                              type="checkbox"
-                              checked={scenarioLockRetirement}
-                              onChange={e => setScenarioLockRetirement(e.target.checked)}
-                              className="accent-amber-500 w-3 h-3"
-                            />
-                            Lock to retirement
-                          </label>
+                {/* Scenario Tester */}
+                <div
+                  className="relative w-52"
+                  style={{ zIndex: scenarioHovered ? 50 : 1 }}
+                  onMouseEnter={() => { clearTimeout(scenarioLeaveTimer.current); setScenarioHovered(true) }}
+                  onMouseLeave={() => { scenarioLeaveTimer.current = setTimeout(() => setScenarioHovered(false), 150) }}
+                >
+                  <div className={`card cursor-default transition-shadow duration-200 ${scenarioHovered ? 'shadow-md' : ''} ${scenarioActive ? '!border-amber-300 dark:!border-amber-700' : ''}`}>
+                    <div className="flex items-start py-0.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h2 className="text-xs font-semibold text-gray-900 dark:text-gray-100 whitespace-nowrap">Scenarios</h2>
+                          <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 text-gray-400 transition-transform duration-200 flex-shrink-0 ${scenarioHovered ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                          </svg>
                         </div>
+                        <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
+                          {scenarioActive ? (activeEvent ? activeEvent.name : 'Custom overrides active') : 'Shock Analysis'}
+                        </p>
                       </div>
-                      <input type="range" min="65" max="90" step="1" value={scenarioSliders.startAge}
-                        disabled={scenarioLockRetirement}
-                        onChange={e => setScenarioSliders(s => ({ ...s, startAge: parseInt(e.target.value) }))}
-                        className={`w-full accent-gray-900 dark:accent-white ${scenarioLockRetirement ? 'opacity-30' : ''}`} />
-                    </div>
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500 dark:text-gray-400">Duration</span>
-                        <span className="font-medium tabular-nums text-gray-600 dark:text-gray-300">{effectiveScenario.durationYears} yr{effectiveScenario.durationYears > 1 ? 's' : ''}</span>
-                      </div>
-                      <input type="range" min="1" max="5" step="1"
-                        value={activeEvent ? activeEvent.durationYears : scenarioSliders.durationYears}
-                        onChange={e => { setScenarioSliders(s => ({ ...s, durationYears: parseInt(e.target.value) })); setSelectedEventId(null) }}
-                        className="w-full accent-gray-900 dark:accent-white" />
                     </div>
                   </div>
-
-                  {/* Scenarios */}
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Scenarios</p>
-                    <div className="flex flex-wrap gap-1">
-                      {HISTORICAL_EVENTS.map(ev => (
+                  {scenarioHovered && (
+                    <div className="overlay-panel absolute top-full left-0 mt-1 card shadow-xl space-y-3" style={{ zIndex: 50, minWidth: 340 }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-200">Shock Analysis</h3>
+                          <button
+                            onClick={() => {
+                              const idx = Math.floor(Math.random() * HISTORICAL_EVENTS.length)
+                              const evt = HISTORICAL_EVENTS[idx]
+                              setSelectedEventId(evt.id)
+                              setScenarioSliders(s => ({ ...s, durationYears: evt.durationYears, returnDelta: evt.returnDelta, inflationDelta: evt.inflationDelta }))
+                              setScenarioActive(true)
+                            }}
+                            className="text-[10px] font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          >
+                            Randomize
+                          </button>
+                        </div>
                         <button
-                          key={ev.id}
-                          onClick={() => setSelectedEventId(id => id === ev.id ? null : ev.id)}
-                          className={`text-[10px] font-medium px-2 py-0.5 rounded-lg border transition-all ${
-                            selectedEventId === ev.id
-                              ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
-                              : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                          onClick={() => setScenarioActive(a => !a)}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
+                            scenarioActive
+                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
                           }`}
                         >
-                          {ev.name} <span className="opacity-50">{ev.year}</span>
+                          {scenarioActive ? 'Active' : 'Inactive'}
                         </button>
-                      ))}
-                    </div>
-
-                    {/* Story */}
-                    {activeEvent && (
-                      <div className="bg-gray-50 dark:bg-gray-800/60 rounded-lg px-2.5 py-2 space-y-1">
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">{activeEvent.story}</p>
-                        <div className="flex items-center gap-3">
-                          <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.returnDelta < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            Returns {activeEvent.returnDelta > 0 ? '+' : ''}{activeEvent.returnDelta}%/yr
-                          </span>
-                          <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.inflationDelta > 0 ? 'text-amber-500' : activeEvent.inflationDelta < 0 ? 'text-blue-500' : 'text-gray-400'}`}>
-                            Inflation {activeEvent.inflationDelta > 0 ? '+' : ''}{activeEvent.inflationDelta}%
-                          </span>
-                          <span className="text-[10px] text-gray-400">{activeEvent.durationYears} yr{activeEvent.durationYears > 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 bg-gray-50 dark:bg-gray-800/60 rounded-lg px-3 py-2">
+                        <div>
+                          <p className="text-[11px] font-medium text-gray-700 dark:text-gray-300">Show as overlay</p>
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500">Compare stressed vs base on the chart</p>
+                        </div>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setScenarioOverlay(v => !v); if (!scenarioActive) setScenarioActive(true) }}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full transition-colors flex-shrink-0 ${
+                            scenarioOverlay
+                              ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          {scenarioOverlay ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-gray-500 dark:text-gray-400">Return Rate Δ</span>
+                            <span className={`font-medium tabular-nums ${effectiveScenario.returnDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : effectiveScenario.returnDelta < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                              {effectiveScenario.returnDelta > 0 ? '+' : ''}{effectiveScenario.returnDelta}%/yr
+                            </span>
+                          </div>
+                          <input type="range" min={-20} max={10} step={0.5} value={scenarioSliders.returnDelta}
+                            onChange={e => { setScenarioSliders(s => ({ ...s, returnDelta: parseFloat(e.target.value) })); setScenarioActive(true); setSelectedEventId(null) }}
+                            className="w-full accent-gray-900 dark:accent-white"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-gray-500 dark:text-gray-400">Inflation Δ</span>
+                            <span className={`font-medium tabular-nums ${effectiveScenario.inflationDelta > 0 ? 'text-amber-500' : effectiveScenario.inflationDelta < 0 ? 'text-blue-500' : 'text-gray-400'}`}>
+                              {effectiveScenario.inflationDelta > 0 ? '+' : ''}{effectiveScenario.inflationDelta}%
+                            </span>
+                          </div>
+                          <input type="range" min={-2} max={8} step={0.5} value={scenarioSliders.inflationDelta}
+                            onChange={e => { setScenarioSliders(s => ({ ...s, inflationDelta: parseFloat(e.target.value) })); setScenarioActive(true); setSelectedEventId(null) }}
+                            className="w-full accent-gray-900 dark:accent-white"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-gray-500 dark:text-gray-400">Start Age</span>
+                            <span className="font-medium tabular-nums text-gray-700 dark:text-gray-300">{effectiveScenario.startAge}</span>
+                          </div>
+                          <input type="range" min={inputs.retirementAge ?? 60} max={90} step={1} value={scenarioSliders.startAge}
+                            onChange={e => { setScenarioSliders(s => ({ ...s, startAge: parseInt(e.target.value) })); setScenarioActive(true); setSelectedEventId(null) }}
+                            className="w-full accent-gray-900 dark:accent-white"
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="text-gray-500 dark:text-gray-400">Duration</span>
+                            <span className="font-medium tabular-nums text-gray-700 dark:text-gray-300">{effectiveScenario.durationYears} yr{effectiveScenario.durationYears > 1 ? 's' : ''}</span>
+                          </div>
+                          <input type="range" min={1} max={30} step={1} value={scenarioSliders.durationYears}
+                            onChange={e => { setScenarioSliders(s => ({ ...s, durationYears: parseInt(e.target.value) })); setScenarioActive(true); setSelectedEventId(null) }}
+                            className="w-full accent-gray-900 dark:accent-white"
+                          />
                         </div>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Reset */}
-                  <button
-                    onClick={() => { setScenarioSliders({ returnDelta: 0, inflationDelta: 0, startAge: 75, durationYears: 1 }); setSelectedEventId(null); setScenarioActive(false); setScenarioOverlay(false); setScenarioLockRetirement(false) }}
-                    className="w-full text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1 border border-gray-100 dark:border-gray-800 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
-                  >
-                    Reset
-                  </button>
+                      <div className="flex flex-wrap gap-1">
+                        {HISTORICAL_EVENTS.map(ev => (
+                          <button
+                            key={ev.id}
+                            onClick={() => setSelectedEventId(id => id === ev.id ? null : ev.id)}
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-lg border transition-all ${
+                              selectedEventId === ev.id
+                                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
+                                : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
+                            }`}
+                          >
+                            {ev.name} <span className="opacity-50">{ev.year}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {activeEvent && (
+                        <div className="bg-gray-50 dark:bg-gray-800/60 rounded-lg px-2.5 py-2 space-y-1">
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">{activeEvent.story}</p>
+                          <div className="flex items-center gap-3">
+                            <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.returnDelta < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                              Returns {activeEvent.returnDelta > 0 ? '+' : ''}{activeEvent.returnDelta}%/yr
+                            </span>
+                            <span className={`text-[10px] font-semibold tabular-nums ${activeEvent.inflationDelta > 0 ? 'text-amber-500' : activeEvent.inflationDelta < 0 ? 'text-blue-500' : 'text-gray-400'}`}>
+                              Inflation {activeEvent.inflationDelta > 0 ? '+' : ''}{activeEvent.inflationDelta}%
+                            </span>
+                            <span className="text-[10px] text-gray-400">{activeEvent.durationYears} yr{activeEvent.durationYears > 1 ? 's' : ''}</span>
+                          </div>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => { setScenarioSliders({ returnDelta: 0, inflationDelta: 0, startAge: 75, durationYears: 1 }); setSelectedEventId(null); setScenarioActive(false); setScenarioOverlay(false); setScenarioLockRetirement(false) }}
+                        className="w-full text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1 border border-gray-100 dark:border-gray-800 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* What-If Analysis */}
-            {result && (
-              <WhatIfPanel
-                inputs={inputs}
-                strategy={strategy}
-                rrspDrawdown={rrspDrawdown}
-                cashOutflows={cashOutflows}
-                cashOutflowTaxRates={cashOutflowTaxRates}
-                retCashInflows={retCashInflows}
-                scenarioActive={scenarioActive}
-                effectiveScenario={effectiveScenario}
-                baseResult={{ ...result, mcProb: mcResult?.probabilityOfSuccess ?? null }}
-                mcActive={true}
-              />
-            )}
+                {/* What-If Analysis */}
+                {result && (
+                  <WhatIfPanel
+                    inputs={inputs}
+                    strategy={strategy}
+                    rrspDrawdown={rrspDrawdown}
+                    cashOutflows={cashOutflows}
+                    cashOutflowTaxRates={cashOutflowTaxRates}
+                    retCashInflows={retCashInflows}
+                    scenarioActive={scenarioActive}
+                    effectiveScenario={effectiveScenario}
+                    baseResult={{ ...result, mcProb: mcResult?.probabilityOfSuccess ?? null }}
+                    mcActive={true}
+                  />
+                )}
 
-            {/* Income Target */}
-            <IncomeTargetPanel
-              budget={budget}
-              inputs={inputs}
-              onOpenBudget={() => setActiveApp('budget')}
-              incomeTargetEnabled={incomeTargetEnabled}
-              onEnabledChange={(v) => updatePC({ incomeTargetEnabled: v })}
-              onAmountChange={(v) => updatePC({ incomeTargetAmount: v })}
-              strategyAmount={
-                strategy.strategyType !== 'fixedPct'
-                  ? (strategy.strategyParams.annualExpense ?? strategy.strategyParams.baseAmount ?? 0)
-                  : null
-              }
-            />
+              </div>
 
           </div>
 
@@ -1437,15 +1506,42 @@ export default function App() {
 
           {/* Accumulation Portfolio chart */}
           {result && activeTab === 'accChart' && (
-            <AccumulationChart
-              accounts={inputs.accounts}
-              currentAge={inputs.currentAge}
-              retirementAge={inputs.retirementAge}
-              inflation={inputs.inflation}
-              workingMarginalRate={inputs.workingMarginalRate}
-              nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
-              darkMode={darkMode}
-            />
+            <div className="space-y-5">
+              <AccumulationChart
+                accounts={inputs.accounts}
+                currentAge={inputs.currentAge}
+                retirementAge={inputs.retirementAge}
+                inflation={inputs.inflation}
+                workingMarginalRate={inputs.workingMarginalRate}
+                nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
+                darkMode={darkMode}
+              />
+              <AccumulationGrowthBar
+                accounts={inputs.accounts}
+                currentAge={inputs.currentAge}
+                retirementAge={inputs.retirementAge}
+                workingMarginalRate={inputs.workingMarginalRate}
+                nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
+                darkMode={darkMode}
+              />
+              <AccumulationAllocationChart
+                accounts={inputs.accounts}
+                currentAge={inputs.currentAge}
+                retirementAge={inputs.retirementAge}
+                workingMarginalRate={inputs.workingMarginalRate}
+                nonRegOrdinaryPct={inputs.nonRegOrdinaryPct}
+                darkMode={darkMode}
+              />
+              <ContributionRateChart
+                accounts={inputs.accounts}
+                currentAge={inputs.currentAge}
+                retirementAge={inputs.retirementAge}
+                annualSalary={inputs.annualSalary ?? 0}
+                budgetAnnualIncome={(budget?.incomes ?? []).filter(i => i.enabled !== false).reduce((s, i) => s + (i.grossMonthly ?? 0) * 12, 0)}
+                onGoToIncome={() => { setActiveApp('budget'); setBudgetTab('income') }}
+                darkMode={darkMode}
+              />
+            </div>
           )}
 
           {/* Retirement Portfolio chart */}

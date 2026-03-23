@@ -1,9 +1,11 @@
 import { useState, Fragment, useMemo, useRef } from 'react'
+import ExpenseTracker from './ExpenseTracker.jsx'
+import { buildDemoTransactions } from './ExpenseTracker.jsx'
 import { createPortal } from 'react-dom'
 import {
   PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip,
-  ResponsiveContainer, Legend,
+  ResponsiveContainer, Legend, ReferenceLine, Line,
 } from 'recharts'
 import { calcTax, PROVINCES } from '../lib/tax.js'
 import { calcTfsaLimit } from '../lib/simulate.js'
@@ -35,12 +37,36 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 const BUDGET_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'income',    label: 'Income'    },
-  { id: 'expenses',  label: 'Expenses'  },
+  { id: 'plan',      label: 'Plan'      },
   { id: 'capex',     label: 'CapEx'     },
   { id: 'goals',     label: 'Goals'     },
 ]
 
 const GOAL_COLORS = ['#16a34a', '#2563eb', '#d97706', '#7c3aed', '#dc2626', '#0891b2']
+
+// ─── Demo account overlays (balance/rate/minPayment shown when dashDemo is on) ─
+const DEMO_CASH_OVERLAYS = [
+  { balance: 8420,  rate: 0.5 },
+  { balance: 18750, rate: 2.1 },
+  { balance: 5200,  rate: 0.3 },
+  { balance: 3840,  rate: 0.0 },
+]
+const DEMO_INV_OVERLAYS = [
+  { balance: 112400, rate: 7.2 },
+  { balance: 45200,  rate: 5.8 },
+  { balance: 23800,  rate: 6.5 },
+  { balance: 68000,  rate: 7.0 },
+]
+const DEMO_DEBT_OVERLAYS = [
+  { balance: 2340,   rate: 19.99, minPayment: 120  },
+  { balance: 385000, rate: 5.50,  minPayment: 2200 },
+  { balance: 14500,  rate: 6.00,  minPayment: 350  },
+  { balance: 9800,   rate: 8.00,  minPayment: 250  },
+]
+const DEMO_OTHER_ASSETS = [
+  { id: 'demo_re',  name: 'Primary Residence', assetType: 'real_estate', value: 650000, appreciation: 3.5 },
+  { id: 'demo_car', name: 'Vehicle',            assetType: 'vehicle',     value: 28000,  appreciation: -8  },
+]
 
 let _nextId = 200
 function nextId(prefix) { return `${prefix}_${_nextId++}` }
@@ -97,21 +123,24 @@ function calcIncomeNet(item, province) {
 
 // ─── Expense helpers ──────────────────────────────────────────────────────────
 
-function itemMonths(item) { return item.months ?? Array(12).fill(item.monthly ?? 0) }
+function itemMonths(item, year) {
+  if (year != null && item.monthsByYear?.[year]) return item.monthsByYear[year]
+  return item.months ?? Array(12).fill(item.monthly ?? 0)
+}
 
 // Leaf-level avg (no subItem recursion)
-function leafAvg(item) { return itemMonths(item).reduce((s, v) => s + v, 0) / 12 }
+function leafAvg(item, year) { return itemMonths(item, year).reduce((s, v) => s + v, 0) / 12 }
 
 // Aggregated avg — if item has subItems, sum those; else use own months
-function avgMonthly(item) {
-  if (item.subItems?.length) return item.subItems.reduce((s, si) => s + leafAvg(si), 0)
-  return leafAvg(item)
+function avgMonthly(item, year) {
+  if (item.subItems?.length) return item.subItems.reduce((s, si) => s + leafAvg(si, year), 0)
+  return leafAvg(item, year)
 }
 
 // Aggregated 12-month array for an item with subItems
-function itemMonthsAgg(item) {
-  if (!item.subItems?.length) return itemMonths(item)
-  return Array(12).fill(0).map((_, i) => item.subItems.reduce((s, si) => s + (si.months?.[i] ?? 0), 0))
+function itemMonthsAgg(item, year) {
+  if (!item.subItems?.length) return itemMonths(item, year)
+  return Array(12).fill(0).map((_, i) => item.subItems.reduce((s, si) => s + (itemMonths(si, year)[i] ?? 0), 0))
 }
 
 // All leaf items (for color mapping, pie chart, etc.)
@@ -138,12 +167,26 @@ function flatCapexItems(capex) {
   }))
 }
 
+// Sinking fund PMT: monthly contribution to accumulate exactly `cost` in `intervalYears` years
+function sinkingFundPMT(cost, intervalYears, returnRate = 3) {
+  const N = Math.max(1, intervalYears) * 12
+  const r = (returnRate ?? 3) / 100 / 12
+  if (r < 0.0001) return cost / N
+  const factor = Math.pow(1 + r, N)
+  return cost * r / (factor - 1)
+}
+
 // Monthly reserve for a capex item or parent card (sums sub-items when present)
+// Uses monthlyContrib override if set (from Optimize), otherwise simple cost/interval/12
 function capexMonthly(c) {
   if (c.subItems?.length > 0) {
-    return c.subItems.reduce((s, si) => s + (si.intervalYears > 0 ? si.cost / si.intervalYears / 12 : 0), 0)
+    return c.subItems.reduce((s, si) => s + (
+      si.monthlyContrib != null ? si.monthlyContrib
+      : si.intervalYears > 0 ? si.cost / si.intervalYears / 12 : 0
+    ), 0)
   }
-  return c.enabled !== false && c.intervalYears > 0 ? c.cost / c.intervalYears / 12 : 0
+  if (c.enabled === false || c.intervalYears <= 0) return 0
+  return c.monthlyContrib != null ? c.monthlyContrib : c.cost / c.intervalYears / 12
 }
 
 // ─── CapEx 30-year projection ─────────────────────────────────────────────────
@@ -157,7 +200,7 @@ function buildCapexProjection(capexGroups, years = 30) {
     const row = { yr }
     let totalMonthly = 0, totalBalance = 0, totalCashNeed = 0
     enabled.forEach((c, i) => {
-      const mo   = c.cost / c.intervalYears / 12
+      const mo   = c.monthlyContrib != null ? c.monthlyContrib : c.cost / c.intervalYears / 12
       const rate = (c.returnRate ?? 3) / 100
       balances[i] = balances[i] * (1 + rate) + mo * 12
       let cashNeed = 0
@@ -787,13 +830,17 @@ function IncomeTab({ incomes, province, incomeCalcs, totalGross, totalCpp, total
 
 function ExpensesTab({
   expenseSections, capex, totalNet, totalExpenses, totalCapexMo, totalOutflow, itemColorMap,
-  onAddSection, onRemoveSection, onUpdateSection,
-  onAddItem, onRemoveItem, onUpdateItem, onUpdateItemMonth,
+  planYear, onPlanYearChange,
+  onAddSection, onRemoveSection, onUpdateSection, onReorderSections,
+  onAddItem, onRemoveItem, onUpdateItem, onUpdateItemMonth, onReorderItems,
   onAddSubItem, onRemoveSubItem, onUpdateSubItem, onUpdateSubItemMonth,
-  onUpdateItemActualMonth, onUpdateSubItemActualMonth,
 }) {
   const [spread, setSpread] = useState(null) // {rect, onSpread}
-  const [actualMode, setActualMode] = useState(false)
+  const [dragSecId, setDragSecId] = useState(null)
+  const [dragOverSecId, setDragOverSecId] = useState(null)
+  // item drag: key = "secId:itemId"
+  const [dragItemKey, setDragItemKey] = useState(null)
+  const [dragOverItemKey, setDragOverItemKey] = useState(null)
   const allExp = expenseSections.flatMap(s => s.items)
 
   function openSpread(e, onSpread, currentAnnual) {
@@ -817,22 +864,7 @@ function ExpensesTab({
       )}
 
       <div className="card overflow-hidden">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Monthly Expenses</h3>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-gray-400">Mode:</span>
-            <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
-              <button
-                onClick={() => setActualMode(false)}
-                className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${!actualMode ? 'bg-white shadow-sm text-gray-900 font-medium dark:bg-gray-700 dark:text-gray-100' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500'}`}
-              >Planned</button>
-              <button
-                onClick={() => setActualMode(true)}
-                className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${actualMode ? 'bg-white shadow-sm text-gray-900 font-medium dark:bg-gray-700 dark:text-gray-100' : 'text-gray-400 hover:text-gray-600 dark:text-gray-500'}`}
-              >Actual</button>
-            </div>
-          </div>
-        </div>
+        <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-3">Monthly Expenses</h3>
 
         {expenseSections.length === 0 && flatCapexItems(capex).filter(c => c.enabled).length === 0 ? (
           <div className="py-8 text-center">
@@ -846,35 +878,56 @@ function ExpensesTab({
             <table className="min-w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-gray-100 dark:border-gray-800">
-                  <th className="text-left py-2 px-2 text-gray-400 font-medium sticky left-0 bg-white dark:bg-gray-900 min-w-[160px] z-10">Category</th>
+                  <th className="text-left py-2 px-2 text-gray-400 font-medium sticky left-0 bg-white dark:bg-gray-900 min-w-[160px] z-10">
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => onPlanYearChange(y => y - 1)} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-base leading-none">‹</button>
+                      <span className="text-[11px] font-bold text-gray-700 dark:text-gray-200 tabular-nums">{planYear}</span>
+                      <button onClick={() => onPlanYearChange(y => y + 1)} className="w-5 h-5 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-base leading-none">›</button>
+                    </div>
+                  </th>
                   <th className="w-5"></th>
                   <th className="text-right py-2 px-0.5 text-gray-400 font-medium w-[52px]">Avg</th>
                   <th className="text-right py-2 px-0.5 text-gray-400 font-medium w-[58px]">12m ↕</th>
                   <th className="text-right py-2 px-0.5 text-gray-400 font-medium w-[46px]">% Net</th>
                   {MONTHS.map(m => (
-                    <th key={m} className="text-right py-2 px-0.5 text-gray-400 font-medium w-[52px]">
-                      {actualMode ? <span>{m}<br/><span className="text-[9px] text-emerald-500">Act</span></span> : m}
-                    </th>
+                    <th key={m} className="text-right py-2 px-0.5 text-gray-400 font-medium w-[52px]">{m}</th>
                   ))}
                   <th className="w-5"></th>
                 </tr>
               </thead>
               <tbody>
                 {expenseSections.map(sec => {
-                  const secAvg        = sec.items.reduce((s, i) => s + avgMonthly(i), 0)
+                  const secAvg        = sec.items.reduce((s, i) => s + avgMonthly(i, planYear), 0)
                   const secMonthTotals = Array(12).fill(0).map((_, mi) =>
-                    sec.items.reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
+                    sec.items.reduce((s, item) => s + (itemMonthsAgg(item, planYear)[mi] ?? 0), 0)
                   )
                   return (
                     <Fragment key={sec.id}>
-                      {/* Section header */}
-                      <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-800">
+                      {/* Section header — draggable */}
+                      <tr
+                        draggable
+                        onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragSecId(sec.id) }}
+                        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverSecId(sec.id) }}
+                        onDrop={e => { e.preventDefault(); if (dragSecId && dragSecId !== sec.id) onReorderSections(dragSecId, sec.id); setDragSecId(null); setDragOverSecId(null) }}
+                        onDragEnd={() => { setDragSecId(null); setDragOverSecId(null) }}
+                        className={`border-b border-gray-100 dark:border-gray-800 transition-all
+                          ${dragSecId === sec.id ? 'opacity-40' : 'bg-gray-50 dark:bg-gray-800/50'}
+                          ${dragOverSecId === sec.id && dragSecId !== sec.id ? 'border-t-2 border-t-brand-400 dark:border-t-brand-500' : ''}`}
+                      >
                         <td className="py-1.5 px-2 sticky left-0 bg-gray-50 dark:bg-gray-800 z-10 min-w-[160px]">
-                          <input
-                            className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide bg-transparent border-none outline-none focus:ring-0 focus:bg-white dark:focus:bg-gray-700 rounded px-1 -mx-1 py-0.5 w-40"
-                            value={sec.name}
-                            onChange={e => onUpdateSection(sec.id, 'name', e.target.value)}
-                          />
+                          <div className="flex items-center gap-1.5">
+                            <span className="cursor-grab text-gray-300 dark:text-gray-600 select-none text-[13px] leading-none" title="Drag to reorder">⠿</span>
+                            <button
+                              onClick={() => onRemoveSection(sec.id)}
+                              title="Remove section"
+                              className="w-4 h-4 rounded flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 dark:text-gray-600 dark:hover:bg-red-900/30 font-bold text-sm flex-shrink-0 transition-colors leading-none"
+                            >−</button>
+                            <input
+                              className="text-[11px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide bg-transparent border-none outline-none focus:ring-0 focus:bg-white dark:focus:bg-gray-700 rounded px-1 -mx-1 py-0.5 w-32"
+                              value={sec.name}
+                              onChange={e => onUpdateSection(sec.id, 'name', e.target.value)}
+                            />
+                          </div>
                         </td>
                         <td className="py-1.5 px-1 bg-gray-50 dark:bg-gray-800/50">
                           <button
@@ -884,28 +937,49 @@ function ExpensesTab({
                           >+</button>
                         </td>
                         <td colSpan={COL_SPAN - 3} className="bg-gray-50 dark:bg-gray-800/50" />
-                        <td className="py-1.5 px-1 bg-gray-50 dark:bg-gray-800/50">
-                          <button onClick={() => onRemoveSection(sec.id)} className="w-4 h-4 rounded flex items-center justify-center text-gray-300 hover:text-red-500 text-sm dark:text-gray-600 transition-colors">×</button>
-                        </td>
+                        <td className="bg-gray-50 dark:bg-gray-800/50" />
                       </tr>
 
                       {/* Items */}
                       {sec.items.map(item => {
                         const hasSub = item.subItems?.length > 0
-                        const avg    = avgMonthly(item)
-                        const months = itemMonthsAgg(item) // agg if has subItems
+                        const avg    = avgMonthly(item, planYear)
+                        const months = itemMonthsAgg(item, planYear) // agg if has subItems
 
+                        const itemKey = `${sec.id}:${item.id}`
                         return (
                           <Fragment key={item.id}>
-                            {/* Item / category row */}
-                            <tr className={`border-b border-gray-50 dark:border-gray-800/30 group transition-colors ${hasSub ? 'bg-gray-50/40 dark:bg-gray-800/20' : 'hover:bg-amber-50/30 dark:hover:bg-amber-900/5'}`}>
+                            {/* Item / category row — draggable */}
+                            <tr
+                              draggable
+                              onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragItemKey(itemKey) }}
+                              onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOverItemKey(itemKey) }}
+                              onDrop={e => {
+                                e.preventDefault()
+                                if (dragItemKey && dragItemKey !== itemKey) {
+                                  const [fromSec, fromItem] = dragItemKey.split(':')
+                                  if (fromSec === sec.id) onReorderItems(sec.id, fromItem, item.id)
+                                }
+                                setDragItemKey(null); setDragOverItemKey(null)
+                              }}
+                              onDragEnd={() => { setDragItemKey(null); setDragOverItemKey(null) }}
+                              className={`border-b border-gray-50 dark:border-gray-800/30 group transition-all
+                                ${dragItemKey === itemKey ? 'opacity-40' : hasSub ? 'bg-gray-50/40 dark:bg-gray-800/20' : 'hover:bg-amber-50/30 dark:hover:bg-amber-900/5'}
+                                ${dragOverItemKey === itemKey && dragItemKey !== itemKey ? 'border-t-2 border-t-brand-400 dark:border-t-brand-500' : ''}`}
+                            >
                               <td className={`py-0.5 px-2 sticky left-0 z-10 transition-colors ${hasSub ? 'bg-gray-50 dark:bg-gray-800' : 'bg-white dark:bg-gray-900 group-hover:bg-amber-50 dark:group-hover:bg-amber-950'}`}>
                                 <div className="flex items-center gap-1.5">
+                                  {/* − remove button */}
+                                  <button
+                                    onClick={() => onRemoveItem(sec.id, item.id)}
+                                    title="Remove item"
+                                    className="w-4 h-4 rounded flex items-center justify-center text-gray-300 hover:text-red-500 hover:bg-red-50 dark:text-gray-600 dark:hover:bg-red-900/30 font-bold text-sm flex-shrink-0 transition-colors leading-none opacity-0 group-hover:opacity-100"
+                                  >−</button>
                                   {/* dot — square for category, circle for leaf */}
                                   <div className={`w-1.5 h-1.5 flex-shrink-0 ${hasSub ? 'rounded-sm bg-gray-400 dark:bg-gray-500' : 'rounded-full'}`}
                                     style={hasSub ? {} : { background: COLORS[(itemColorMap[item.id] ?? 0) % COLORS.length] }} />
                                   <input
-                                    className={`input-field min-w-0 w-28 py-0.5 ${hasSub ? 'text-[11px] font-medium text-gray-700 dark:text-gray-200' : 'text-[11px]'}`}
+                                    className={`input-field min-w-0 w-24 py-0.5 ${hasSub ? 'text-[11px] font-medium text-gray-700 dark:text-gray-200' : 'text-[11px]'}`}
                                     value={item.name}
                                     onChange={e => onUpdateItem(sec.id, item.id, 'name', e.target.value)}
                                     placeholder="Item name"
@@ -966,31 +1040,20 @@ function ExpensesTab({
                                     </span>
                                   </td>
                                 ))
-                              ) : actualMode ? (
-                                (item.actualMonths ?? Array(12).fill(0)).map((av, i) => (
-                                  <td key={i} className="py-0.5 px-0.5">
-                                    <div className="flex flex-col gap-0.5">
-                                      <span className="text-[9px] text-gray-300 dark:text-gray-700 text-right tabular-nums px-1">{itemMonths(item)[i] > 0 ? fmtNum(itemMonths(item)[i]) : '—'}</span>
-                                      <CellInput value={av} onChange={val => onUpdateItemActualMonth(sec.id, item.id, i, val)} />
-                                    </div>
-                                  </td>
-                                ))
                               ) : (
-                                itemMonths(item).map((v, i) => (
+                                itemMonths(item, planYear).map((v, i) => (
                                   <td key={i} className="py-0.5 px-0.5">
                                     <CellInput value={v} onChange={val => onUpdateItemMonth(sec.id, item.id, i, val)} />
                                   </td>
                                 ))
                               )}
 
-                              <td className="py-0.5 px-1">
-                                <button onClick={() => onRemoveItem(sec.id, item.id)} className="w-4 h-4 rounded flex items-center justify-center text-gray-200 hover:text-red-500 text-sm dark:text-gray-700 opacity-0 group-hover:opacity-100 transition-all">×</button>
-                              </td>
+                              <td />
                             </tr>
 
                             {/* Sub-item rows */}
                             {hasSub && item.subItems.map(si => {
-                              const siAvg = leafAvg(si)
+                              const siAvg = leafAvg(si, planYear)
                               return (
                                 <tr key={si.id} className="border-b border-gray-50 dark:border-gray-800/20 hover:bg-amber-50/20 dark:hover:bg-amber-900/5 transition-colors">
                                   <td className="py-0.5 pl-7 pr-2 sticky left-0 bg-white dark:bg-gray-900 hover:bg-amber-50 z-10 transition-colors">
@@ -1035,22 +1098,11 @@ function ExpensesTab({
                                     </button>
                                   </td>
                                   <td className="py-0.5 px-0.5 text-right text-gray-400 tabular-nums text-[11px]">{totalOutflow > 0 && siAvg > 0 ? pct(siAvg / totalOutflow) : '—'}</td>
-                                  {actualMode ? (
-                                    (si.actualMonths ?? Array(12).fill(0)).map((av, i) => (
-                                      <td key={i} className="py-0.5 px-0.5">
-                                        <div className="flex flex-col gap-0.5">
-                                          <span className="text-[9px] text-gray-300 dark:text-gray-700 text-right tabular-nums px-1">{itemMonths(si)[i] > 0 ? fmtNum(itemMonths(si)[i]) : '—'}</span>
-                                          <CellInput value={av} onChange={val => onUpdateSubItemActualMonth(sec.id, item.id, si.id, i, val)} />
-                                        </div>
-                                      </td>
-                                    ))
-                                  ) : (
-                                    itemMonths(si).map((v, i) => (
-                                      <td key={i} className="py-0.5 px-0.5">
-                                        <CellInput value={v} onChange={val => onUpdateSubItemMonth(sec.id, item.id, si.id, i, val)} />
-                                      </td>
-                                    ))
-                                  )}
+                                  {itemMonths(si, planYear).map((v, i) => (
+                                    <td key={i} className="py-0.5 px-0.5">
+                                      <CellInput value={v} onChange={val => onUpdateSubItemMonth(sec.id, item.id, si.id, i, val)} />
+                                    </td>
+                                  ))}
                                   <td />
                                 </tr>
                               )
@@ -1102,11 +1154,11 @@ function ExpensesTab({
                   <tr className="border-t border-gray-200 dark:border-gray-700 bg-amber-50/40 dark:bg-amber-900/10">
                     <td className="py-1.5 px-2 font-semibold text-gray-700 dark:text-gray-300 sticky left-0 bg-amber-50 dark:bg-amber-950 z-10 text-[11px] uppercase tracking-wide">Expenses Subtotal</td>
                     <td />
-                    <td className="py-1.5 px-0.5 text-right font-semibold text-amber-600 dark:text-amber-400 tabular-nums text-xs">{fmtFull(totalExpenses)}/mo</td>
-                    <td className="py-1.5 px-0.5 text-right font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-xs">{fmtFull(totalExpenses * 12)}</td>
-                    <td className="py-1.5 px-0.5 text-right text-gray-400 tabular-nums text-xs">{totalOutflow > 0 ? pct(totalExpenses / totalOutflow) : '—'}</td>
+                    <td className="py-1.5 px-0.5 text-right font-semibold text-amber-600 dark:text-amber-400 tabular-nums text-[11px]">{fmtFull(totalExpenses)}/mo</td>
+                    <td className="py-1.5 px-0.5 text-right font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-[11px]">{fmtFull(totalExpenses * 12)}</td>
+                    <td className="py-1.5 px-0.5 text-right text-gray-400 tabular-nums text-[11px]">{totalOutflow > 0 ? pct(totalExpenses / totalOutflow) : '—'}</td>
                     {Array(12).fill(0).map((_, i) => {
-                      const col = allLeafItems(expenseSections).reduce((s, item) => s + (item.months?.[i] ?? 0), 0)
+                      const col = allLeafItems(expenseSections).reduce((s, item) => s + (itemMonths(item, planYear)[i] ?? 0), 0)
                       return (
                         <td key={i} className="py-1.5 px-0.5 text-right tabular-nums text-[11px]">
                           <span className={col > 0 ? 'font-medium text-amber-600 dark:text-amber-400' : 'text-gray-200 dark:text-gray-700'}>{col > 0 ? fmtFull(col) : '—'}</span>
@@ -1154,9 +1206,9 @@ function ExpensesTab({
                               </div>
                             </td>
                             <td />
-                            <td className="py-0.5 px-0.5 text-right font-medium text-slate-600 dark:text-slate-400 tabular-nums text-xs">{fmtNum(cat.mo)}</td>
-                            <td className="py-0.5 px-0.5 text-right text-gray-500 dark:text-gray-400 tabular-nums text-xs">{fmtNum(cat.mo * 12)}</td>
-                            <td className="py-0.5 px-0.5 text-right text-gray-400 tabular-nums text-xs">{totalOutflow > 0 ? pct(cat.mo / totalOutflow) : '—'}</td>
+                            <td className="py-0.5 px-0.5 text-right font-medium text-slate-600 dark:text-slate-400 tabular-nums text-[11px]">{fmtNum(cat.mo)}</td>
+                            <td className="py-0.5 px-0.5 text-right text-gray-500 dark:text-gray-400 tabular-nums text-[11px]">{fmtNum(cat.mo * 12)}</td>
+                            <td className="py-0.5 px-0.5 text-right text-gray-400 tabular-nums text-[11px]">{totalOutflow > 0 ? pct(cat.mo / totalOutflow) : '—'}</td>
                             {MONTHS.map((_, i) => (
                               <td key={i} className="py-0.5 px-0.5 text-right">
                                 <span className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">{cat.mo > 0 ? fmtNum(cat.mo) : ''}</span>
@@ -1175,9 +1227,9 @@ function ExpensesTab({
                   <tr className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30">
                     <td className="py-1.5 px-2 font-semibold text-slate-600 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-900 z-10 text-[11px] uppercase tracking-wide">CapEx Subtotal</td>
                     <td />
-                    <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-xs">{fmtFull(totalCapexMo)}/mo</td>
-                    <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-xs">{fmtFull(totalCapexMo * 12)}</td>
-                    <td className="py-1.5 px-0.5 text-right text-gray-400 tabular-nums text-xs">{totalOutflow > 0 ? pct(totalCapexMo / totalOutflow) : '—'}</td>
+                    <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-[11px]">{fmtFull(totalCapexMo)}/mo</td>
+                    <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-[11px]">{fmtFull(totalCapexMo * 12)}</td>
+                    <td className="py-1.5 px-0.5 text-right text-gray-400 tabular-nums text-[11px]">{totalOutflow > 0 ? pct(totalCapexMo / totalOutflow) : '—'}</td>
                     {MONTHS.map((_, i) => (
                       <td key={i} className="py-1.5 px-0.5 text-right text-[11px]">
                         <span className="font-medium text-slate-500 dark:text-slate-400 tabular-nums">{fmtFull(totalCapexMo)}</span>
@@ -1189,13 +1241,13 @@ function ExpensesTab({
 
                 {/* Grand total */}
                 <tr className="border-t-2 border-gray-300 dark:border-gray-600 bg-gray-100/60 dark:bg-gray-800/50">
-                  <td className="py-2 px-2 font-bold text-gray-900 dark:text-gray-100 sticky left-0 bg-gray-100 dark:bg-gray-800 z-10 text-xs">Total Outflows</td>
+                  <td className="py-2 px-2 font-bold text-gray-900 dark:text-gray-100 sticky left-0 bg-gray-100 dark:bg-gray-800 z-10 text-[11px]">Total Outflows</td>
                   <td />
-                  <td className="py-2 px-0.5 text-right font-bold text-gray-900 dark:text-gray-100 tabular-nums text-xs">{fmtFull(totalOutflow)}/mo</td>
-                  <td className="py-2 px-0.5 text-right font-bold text-gray-900 dark:text-gray-100 tabular-nums text-xs">{fmtFull(totalOutflow * 12)}</td>
-                  <td className="py-2 px-0.5 text-right font-bold text-gray-700 dark:text-gray-300 tabular-nums text-xs">{totalOutflow > 0 ? pct(totalOutflow / totalOutflow) : '—'}</td>
+                  <td className="py-2 px-0.5 text-right font-bold text-gray-900 dark:text-gray-100 tabular-nums text-[11px]">{fmtFull(totalOutflow)}/mo</td>
+                  <td className="py-2 px-0.5 text-right font-bold text-gray-900 dark:text-gray-100 tabular-nums text-[11px]">{fmtFull(totalOutflow * 12)}</td>
+                  <td className="py-2 px-0.5 text-right font-bold text-gray-700 dark:text-gray-300 tabular-nums text-[11px]">{totalOutflow > 0 ? pct(totalOutflow / totalOutflow) : '—'}</td>
                   {Array(12).fill(0).map((_, i) => {
-                    const col = allLeafItems(expenseSections).reduce((s, it) => s + (it.months?.[i] ?? 0), 0) + totalCapexMo
+                    const col = allLeafItems(expenseSections).reduce((s, it) => s + (itemMonths(it, planYear)[i] ?? 0), 0) + totalCapexMo
                     return (
                       <td key={i} className="py-2 px-0.5 text-right tabular-nums text-[11px]">
                         <span className="font-bold text-gray-700 dark:text-gray-300">{fmtFull(col)}</span>
@@ -1215,23 +1267,50 @@ function ExpensesTab({
 
 // ─── CapEx Tab ────────────────────────────────────────────────────────────────
 
-function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem, onAddCapexSubItem, onRemoveCapexSubItem, onUpdateCapexSubItem }) {
+function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem, onAddCapexSubItem, onRemoveCapexSubItem, onUpdateCapexSubItem, onOptimize, reserveBal = 0, darkMode = false, lifeExpectancy = 90, currentAge = 40 }) {
   const rawItems = capex.flatMap(g => g.items ?? [])
   const totalMo  = rawItems.reduce((s, item) => s + capexMonthly(item), 0)
-  const { rows: projRows, enabled } = useMemo(() => buildCapexProjection(capex), [capex])
+  const isOptimized = rawItems.some(item =>
+    item.monthlyContrib != null || (item.subItems ?? []).some(si => si.monthlyContrib != null)
+  )
 
   return (
     <div className="space-y-4">
 
-      {/* Summary strip */}
-      {totalMo > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-gray-500 dark:text-gray-400">Total reserve</span>
-          <span className="text-[11px] font-semibold tabular-nums text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 rounded-md">
-            {fmtFull(totalMo)}/mo · {fmtFull(totalMo * 12)}/yr
-          </span>
-        </div>
-      )}
+      {/* Summary strip + Optimize button */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        {totalMo > 0 ? (
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">Total reserve</span>
+            <span className="text-[11px] font-semibold tabular-nums text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 rounded-md">
+              {fmtFull(totalMo)}/mo · {fmtFull(totalMo * 12)}/yr
+            </span>
+            {isOptimized && (
+              <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-md">✓ Optimized</span>
+            )}
+          </div>
+        ) : <div />}
+        {rawItems.length > 0 && (
+          <div className="flex items-center gap-2">
+            {isOptimized && (
+              <button
+                onClick={() => onOptimize(false)}
+                className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline transition-colors"
+              >Reset</button>
+            )}
+            <button
+              onClick={() => onOptimize(true)}
+              className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 8h2m8 0h2M8 2v2m0 8v2M4.5 4.5l1.5 1.5m4 4l1.5 1.5M4.5 11.5l1.5-1.5m4-4l1.5-1.5"/>
+                <circle cx="8" cy="8" r="2"/>
+              </svg>
+              Optimize Contributions
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Cards grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
@@ -1322,73 +1401,14 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
         </button>
       </div>
 
-      {/* 30-year projection */}
-      {enabled.length > 0 && (
-        <div className="card overflow-hidden">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-1">
-            30-Year Reserve Projection
-          </h3>
-          <p className="text-[11px] text-gray-400 mb-3">Balance grows at each item's rate of return. Highlighted rows = replacement year. Red = cash shortfall needed.</p>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-gray-100 dark:border-gray-800">
-                  <th className="text-left py-2 px-2 text-gray-400 font-medium sticky left-0 bg-white dark:bg-gray-900 z-10 w-12">Yr</th>
-                  {enabled.map(c => (
-                    <th key={c.id} className="text-right py-2 px-2 text-gray-400 font-medium whitespace-nowrap min-w-[90px]">
-                      <div style={{ color: CAPEX_COLOR }}>{c.name}</div>
-                      <div className="text-[10px] font-normal text-gray-400">Balance</div>
-                    </th>
-                  ))}
-                  <th className="text-right py-2 px-2 text-gray-400 font-medium whitespace-nowrap border-l border-gray-100 dark:border-gray-800">Mo. Reserve</th>
-                  <th className="text-right py-2 px-2 text-gray-400 font-medium whitespace-nowrap">Total Balance</th>
-                  <th className="text-right py-2 px-2 text-gray-400 font-medium whitespace-nowrap">Cash Need</th>
-                </tr>
-              </thead>
-              <tbody>
-                {projRows.map((row, idx) => {
-                  const hasRepl   = enabled.some(c => row[`rep_${c.id}`])
-                  const hasCashNeed = row.totalCashNeed > 0
-                  const rowBg = hasRepl
-                    ? 'bg-orange-50/70 dark:bg-orange-900/10'
-                    : idx % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/30 dark:bg-gray-800/20'
-                  return (
-                    <tr key={row.yr} className={`border-b border-gray-50 dark:border-gray-800/30 ${rowBg}`}>
-                      <td className={`py-1.5 px-2 font-medium tabular-nums sticky left-0 z-10 ${rowBg} ${hasRepl ? 'text-orange-700 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'}`}>
-                        {row.yr}
-                      </td>
-                      {enabled.map(c => {
-                        const bal  = row[`bal_${c.id}`] ?? 0
-                        const cn   = row[`cn_${c.id}`] ?? 0
-                        const repl = row[`rep_${c.id}`]
-                        return (
-                          <td key={c.id} className="py-1.5 px-2 text-right tabular-nums">
-                            {repl ? (
-                              <div>
-                                <div className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtK(bal)}</div>
-                                {cn > 0  && <div className="text-[10px] text-red-500 dark:text-red-400">−{fmtK(cn)} needed</div>}
-                                {cn === 0 && <div className="text-[10px] text-emerald-500 dark:text-emerald-400">✓ funded</div>}
-                              </div>
-                            ) : (
-                              <span className="text-gray-600 dark:text-gray-400">{fmtK(bal)}</span>
-                            )}
-                          </td>
-                        )
-                      })}
-                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-500 dark:text-slate-400 border-l border-gray-100 dark:border-gray-800">{fmtK(row.totalMonthly)}/mo</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums font-medium text-gray-700 dark:text-gray-300">{fmtK(row.totalBalance)}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums">
-                        {hasCashNeed    ? <span className="font-semibold text-red-600 dark:text-red-400">{fmtK(row.totalCashNeed)}</span>
-                        : hasRepl       ? <span className="text-emerald-500 dark:text-emerald-400 text-[11px]">✓</span>
-                        :                 <span className="text-gray-300 dark:text-gray-700">—</span>}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {/* Reserve projection chart */}
+      {rawItems.length > 0 && (
+        <CapExProjectionChart
+          capex={capex}
+          reserveBal={reserveBal}
+          darkMode={darkMode}
+          projYears={Math.max(5, lifeExpectancy - currentAge)}
+        />
       )}
     </div>
   )
@@ -1855,11 +1875,169 @@ function GoalsTab({ goals = [], onAddGoal, onUpdateGoal, onRemoveGoal }) {
   )
 }
 
+// ─── Account Sparkline ───────────────────────────────────────────────────────
+// Apple-style mini line chart showing projected account balance over 12 months.
+function AcctSparkline({ balance = 0, rate = 0, monthlyAdd = 0, color = '#10b981', id = 'acct', volatility = 0 }) {
+  const months = 12
+  const r = rate / 100 / 12
+  const pts = []
+  let b = balance
+  // Seeded deterministic noise based on id so each account has a unique but consistent shape
+  const seed = String(id).split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) & 0xfffffff, 17)
+  for (let i = 0; i <= months; i++) {
+    const jitter = volatility > 0 ? (((seed * (i + 3) * 1_000_003) % 997) / 997 - 0.5) * volatility * balance : 0
+    pts.push(b + jitter)
+    b = b * (1 + r) + monthlyAdd
+  }
+  const lo = Math.min(...pts), hi = Math.max(...pts)
+  const rng = hi - lo || 1
+  const W = 72, H = 24, PAD = 2
+  const x = i => (i / months) * W
+  const y = v => H - PAD - ((v - lo) / rng) * (H - PAD * 2)
+  const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ')
+  const fill = `${d} L ${W} ${H} L 0 ${H} Z`
+  const uid = `sp-${id}`
+  return (
+    <svg width={W} height={H} className="flex-shrink-0 overflow-visible">
+      <defs>
+        <linearGradient id={uid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={color} stopOpacity={0.25} />
+          <stop offset="100%" stopColor={color} stopOpacity={0}    />
+        </linearGradient>
+      </defs>
+      <path d={fill} fill={`url(#${uid})`} />
+      <path d={d}    fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// ─── Budget Sankey ─────────────────────────────────────────────────────────────
+// SVG Sankey diagram: income → expense items + surplus.
+// showActual: when true, uses transaction actuals instead of planned amounts.
+function BudgetSankey({ expenseSections, capex, totalNet,
+  transactions, planYear, periodMos, periodLabel: pLabel, darkMode, showActual }) {
+
+  const W = 520, H = 320, nodeW = 12, PAD = 4
+
+  const periodNet = totalNet * periodMos.length
+
+  const actualByCat = useMemo(() => {
+    if (!showActual) return {}
+    const map = {}
+    const moSet = new Set(periodMos)
+    for (const t of transactions) {
+      if (!t.categoryId || !t.date || t.type !== 'expense') continue
+      const d = new Date(t.date + 'T00:00:00')
+      if (d.getFullYear() !== planYear || !moSet.has(d.getMonth())) continue
+      map[t.categoryId] = (map[t.categoryId] ?? 0) + Math.abs(t.amount ?? 0)
+    }
+    return map
+  }, [transactions, planYear, periodMos, showActual])
+
+  // Build item-level right nodes
+  const rightRaw = []
+  const palette = ['#f59e0b','#3b82f6','#8b5cf6','#ec4899','#f97316','#0ea5e9','#84cc16','#14b8a6','#a855f7','#6366f1','#10b981','#ef4444','#fb923c','#34d399','#818cf8']
+  let colorIdx = 0
+  for (const sec of expenseSections) {
+    for (const item of sec.items) {
+      const leafs = item.subItems?.length ? item.subItems : [item]
+      let val = 0
+      if (showActual) {
+        val = leafs.reduce((s, l) => s + (actualByCat[l.id] ?? 0), 0)
+      } else {
+        val = leafs.reduce((s, l) =>
+          s + periodMos.reduce((ss, mi) => ss + (itemMonths(l, planYear)[mi] ?? 0), 0), 0)
+      }
+      if (val > 0.5) {
+        rightRaw.push({ id: item.id, label: item.name, value: val, color: palette[colorIdx % palette.length] })
+        colorIdx++
+      }
+    }
+  }
+
+  // CapEx scaled
+  const capexTotal = capex.flatMap(g => g.items ?? []).filter(i => i.enabled !== false)
+    .reduce((s, i) => s + (i.cost ?? 0) / Math.max(1, i.intervalYears ?? 1) / 12, 0) * periodMos.length
+  if (capexTotal > 0.5) rightRaw.push({ id: '_capex', label: 'CapEx Reserve', value: capexTotal, color: '#94a3b8' })
+
+  // Cap at 18 nodes (keep largest)
+  const MAX_NODES = 18
+  if (rightRaw.length > MAX_NODES) {
+    rightRaw.sort((a, b) => b.value - a.value)
+    rightRaw.splice(MAX_NODES)
+    rightRaw.sort((a, b) => {
+      // restore original order: by expenseSections order
+      const ai = expenseSections.flatMap(s => s.items).findIndex(it => it.id === a.id)
+      const bi = expenseSections.flatMap(s => s.items).findIndex(it => it.id === b.id)
+      return ai - bi
+    })
+  }
+
+  const totalRight = rightRaw.reduce((s, n) => s + n.value, 0)
+  const surplus = periodNet - totalRight
+  if (surplus > 1) rightRaw.push({ id: '_surplus', label: 'Surplus', value: surplus, color: '#6366f1' })
+  else if (surplus < -1) rightRaw.push({ id: '_deficit', label: 'Deficit', value: Math.abs(surplus), color: '#ef4444' })
+
+  const total = Math.max(periodNet, totalRight + Math.abs(surplus))
+  if (total <= 0) return <p className="text-[11px] text-center py-8 text-gray-400">Add income and expenses to see the flow</p>
+
+  function layoutNodes(nodes, T, H, PAD) {
+    const usable = H - PAD * Math.max(0, nodes.length - 1)
+    let y = 0
+    return nodes.map(n => {
+      const h = Math.max(3, (n.value / T) * usable)
+      const node = { ...n, y, h }
+      y += h + PAD
+      return node
+    })
+  }
+
+  const incomeColor = '#10b981'
+  const leftH = Math.max(3, (periodNet / total) * H)
+  const rNodes = layoutNodes(rightRaw, total, H, PAD)
+  const tc = darkMode ? '#9ca3af' : '#6b7280'
+
+  let leftCursor = 0
+  const flows = rNodes.map(rn => {
+    const share = rn.value / total
+    const lh = share * leftH
+    const x0 = nodeW, y0t = leftCursor, y0b = leftCursor + lh
+    const x1 = W - nodeW, y1t = rn.y, y1b = rn.y + rn.h
+    const cx = (x0 + x1) / 2
+    leftCursor += lh
+    return {
+      color: rn.color,
+      d: `M ${x0} ${y0t} C ${cx} ${y0t}, ${cx} ${y1t}, ${x1} ${y1t}
+          L ${x1} ${y1b} C ${cx} ${y1b}, ${cx} ${y0b}, ${x0} ${y0b} Z`,
+    }
+  })
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, overflow: 'visible' }}>
+      {flows.map((f, i) => <path key={i} d={f.d} fill={f.color} opacity={0.3} />)}
+      <rect x={0} y={0} width={nodeW} height={leftH} rx={3} fill={incomeColor} />
+      <text x={nodeW + 5} y={leftH / 2} dominantBaseline="middle" fontSize={9} fill={tc} fontWeight={600}>
+        {pLabel}
+      </text>
+      {rNodes.map(rn => (
+        <g key={rn.id}>
+          <rect x={W - nodeW} y={rn.y} width={nodeW} height={Math.max(2, rn.h)} rx={2} fill={rn.color} />
+          <text x={W - nodeW - 5} y={rn.y + rn.h / 2} textAnchor="end" dominantBaseline="middle" fontSize={8.5} fill={tc}>
+            {rn.label} · {fmtFull(rn.value)}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )
+}
+
 // ─── Dashboard Tab ────────────────────────────────────────────────────────────
 
 function DashboardTab({
   totalGross, totalNet, totalExpenses, totalCapexMo, totalOutflow, netCashflow, savingsRate,
-  expenseSections, capex, pieData, barData, darkMode,
+  incomes = [], province = 'ON',
+  expenseSections, capex, pieData, barData, darkMode, planYear,
+  transactions = [], debtAccounts = [],
   lifeExpectancy = 90, currentAge = 40,
   cashAccounts, investmentAccounts,
   onAddCashAccount, onRemoveCashAccount, onUpdateCashAccount,
@@ -1867,714 +2045,646 @@ function DashboardTab({
   onAddInvestmentAccount, onRemoveInvestmentAccount, onUpdateInvestmentAccount,
   onAddInvestmentSubAccount, onRemoveInvestmentSubAccount, onUpdateInvestmentSubAccount,
   retirementInputs = {},
+  onOpenAccounts,
+  dashDemo = false,
+  onToggleDashDemo,
+  otherAssets = [],
 }) {
-  // Per-month expense totals (from actual monthly values)
-  const expByMonth = Array(12).fill(0).map((_, mi) =>
-    expenseSections.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
+  const now = new Date()
+  const [selPeriod, setSelPeriod] = useState({ type: 'quarter', q: 1 })
+
+  // When dashDemo is on, include generated demo transactions
+  const demoTxns = useMemo(() => dashDemo
+    ? buildDemoTransactions({ cashAccounts, investmentAccounts, debtAccounts, expenseSections })
+    : [],
+    [dashDemo, cashAccounts, investmentAccounts, debtAccounts, expenseSections]
   )
-  // CapEx reserve is a transfer to Reserve account, not a true expense
-  const cashflowByMonth = expByMonth.map(exp => totalNet - exp - totalCapexMo)
-  const annualCashflow  = cashflowByMonth.reduce((s, v) => s + v, 0)
-  // Cashflow excluding CapEx transfer (for spending cash balance)
+  const effectiveTxns = dashDemo ? [...transactions, ...demoTxns] : transactions
+
+  // Period helpers
+  const periodMIs = p => {
+    if (p.type === 'annual')  return [0,1,2,3,4,5,6,7,8,9,10,11]
+    if (p.type === 'quarter') return [0,1,2].map(i => (p.q - 1) * 3 + i)
+    return [p.month]
+  }
+  const selMIs    = periodMIs(selPeriod)
+  const selMult   = selMIs.length
+  const selLbl    = selPeriod.type === 'annual' ? 'Annual'
+    : selPeriod.type === 'quarter' ? `Q${selPeriod.q} · ${MONTHS[(selPeriod.q-1)*3]}–${MONTHS[(selPeriod.q-1)*3+2]}`
+    : MONTHS[selPeriod.month]
+
+  // ── Core computations ──────────────────────────────────────────────────────
+  const expByMonth = Array(12).fill(0).map((_, mi) =>
+    expenseSections.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item, planYear)[mi] ?? 0), 0)
+  )
+
+  const periodExp = selMIs.reduce((s, mi) => s + expByMonth[mi], 0)
+  const periodInc = totalNet * selMult
+  const periodCf  = periodInc - periodExp - totalCapexMo * selMult
+  const cashflowByMonth     = expByMonth.map(exp => totalNet - exp - totalCapexMo)
+  const annualCashflow      = cashflowByMonth.reduce((s, v) => s + v, 0)
   const spendCashflowByMonth = expByMonth.map(exp => totalNet - exp)
 
-  // Account projections
   const accBal = a => a.subAccounts?.length > 0
     ? a.subAccounts.reduce((s, sa) => s + (sa.balance ?? 0), 0)
     : (a.balance ?? 0)
-  // Find Reserve sub-account balance (linked to CapEx fund)
-  const reserveBal = cashAccounts.reduce((s, a) => {
+
+  // In demo mode, overlay realistic balances/rates so sparklines show trends
+  const displayCash        = dashDemo
+    ? cashAccounts.map((a, i) => ({ ...a, ...(DEMO_CASH_OVERLAYS[i] ?? DEMO_CASH_OVERLAYS.at(-1)) }))
+    : cashAccounts
+  const displayInvestments = dashDemo
+    ? investmentAccounts.map((a, i) => ({ ...a, ...(DEMO_INV_OVERLAYS[i] ?? DEMO_INV_OVERLAYS.at(-1)) }))
+    : investmentAccounts
+  const displayDebt        = dashDemo
+    ? debtAccounts.map((a, i) => ({ ...a, ...(DEMO_DEBT_OVERLAYS[i] ?? DEMO_DEBT_OVERLAYS.at(-1)) }))
+    : debtAccounts
+  const displayOtherAssets = dashDemo && otherAssets.length === 0 ? DEMO_OTHER_ASSETS : otherAssets
+  const totalOtherAssets   = displayOtherAssets.reduce((s, a) => s + (a.value ?? 0), 0)
+
+  const reserveBal = displayCash.reduce((s, a) => {
     if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name === 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
     return s
   }, 0)
-  const cashExReserve    = cashAccounts.reduce((s, a) => {
+  const cashExReserve = displayCash.reduce((s, a) => {
     if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name !== 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
     return s + (a.balance ?? 0)
   }, 0)
-  const totalCash        = cashAccounts.reduce((s, a) => s + accBal(a), 0)
-  const totalInvestments = investmentAccounts.reduce((s, a) => s + accBal(a), 0)
-  const projCash         = cashAccounts.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 0) / 100), 0) + annualCashflow
-  const projInvestments  = investmentAccounts.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 6) / 100), 0)
-  const totalNW          = totalCash + totalInvestments
-  const projNW           = projCash + projInvestments
+  const totalCash        = displayCash.reduce((s, a) => s + accBal(a), 0)
+  const totalInvestments = displayInvestments.reduce((s, a) => s + accBal(a), 0)
+  const totalDebt        = displayDebt.reduce((s, a) => s + (a.balance ?? 0), 0)
+  const totalNW          = totalCash + totalInvestments + totalOtherAssets - totalDebt
+  const projCash         = displayCash.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 0) / 100), 0) + annualCashflow
+  const projInvestments  = displayInvestments.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 6) / 100), 0)
+  const projNW           = projCash + projInvestments - totalDebt
+
+  // ── 10-year net worth projection for hero chart ─────────────────────────────
+  const nwChartData = useMemo(() => {
+    const baseYear = now.getFullYear()
+    const totalInvBal = displayInvestments.reduce((s, a) => s + accBal(a), 0)
+    const weightedInvRate = totalInvBal > 0
+      ? displayInvestments.reduce((s, a) => s + accBal(a) * (a.rate ?? 6), 0) / totalInvBal / 100
+      : 0.06
+    let runCash  = totalCash
+    let runInv   = totalInvestments
+    let runDebts = displayDebt.map(a => ({ rate: a.rate ?? 0, balance: a.balance ?? 0, minPayment: a.minPayment ?? 0 }))
+    const rows = [{ year: 'Now', assets: totalCash + totalInvestments + totalOtherAssets, liabilities: totalDebt, netWorth: totalNW }]
+    let runOther = totalOtherAssets
+    for (let y = 1; y <= 10; y++) {
+      runCash = runCash + annualCashflow
+      runInv  = runInv * (1 + weightedInvRate)
+      runOther = displayOtherAssets.reduce((s, a) => s + (a.value ?? 0) * Math.pow(1 + (a.appreciation ?? 0) / 100, y), 0)
+      runDebts = runDebts.map(d => {
+        let bal = d.balance
+        const r = d.rate / 100 / 12
+        const mp = d.minPayment
+        for (let m = 0; m < 12; m++) bal = Math.max(0, bal * (1 + r) - mp)
+        return { ...d, balance: bal }
+      })
+      const assets      = Math.max(0, runCash) + runInv + runOther
+      const liabilities = runDebts.reduce((s, d) => s + d.balance, 0)
+      rows.push({ year: String(baseYear + y), assets: Math.round(assets), liabilities: Math.round(liabilities), netWorth: Math.round(assets - liabilities) })
+    }
+    return rows
+  }, [totalCash, totalInvestments, totalDebt, annualCashflow, displayCash, displayInvestments, displayDebt])
+
+  // ── Transaction helpers for budget progress ─────────────────────────────────
+  const planTxns = useMemo(() =>
+    effectiveTxns.filter(t => t.date && new Date(t.date + 'T00:00:00').getFullYear() === planYear && t.categoryId),
+    [effectiveTxns, planYear]
+  )
+  const hasTxns = planTxns.length > 0
+
+  const actualByCat = useMemo(() => {
+    const map = {}
+    if (!hasTxns) return map
+    for (const t of planTxns) {
+      if (!map[t.categoryId]) map[t.categoryId] = Array(12).fill(0)
+      map[t.categoryId][new Date(t.date + 'T00:00:00').getMonth()] += Math.abs(t.amount ?? 0)
+    }
+    return map
+  }, [planTxns, hasTxns])
+
+  const axisColor = darkMode ? '#6b7280' : '#9ca3af'
+  const tooltipStyle = {
+    background: darkMode ? '#111827' : '#fff',
+    border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`,
+    borderRadius: '0.75rem',
+    fontSize: 11,
+    padding: '8px 12px',
+  }
+
+  const yFmt = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${Math.round(v)}`
+
+  // ── Cashflow bar chart data ─────────────────────────────────────────────────
+  const cashflowChartData = MONTHS.map((m, mi) => ({
+    month: m,
+    income: totalNet,
+    spending: expByMonth[mi],
+    cashflow: cashflowByMonth[mi],
+  }))
+
+  // ── Recent transactions (last 8, non-demo, date desc) ───────────────────────
+  const recentTxns = useMemo(() =>
+    [...effectiveTxns]
+      .filter(t => !t.isDemo && t.date)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8),
+    [effectiveTxns]
+  )
+
+  // Helper: find category name from expenseSections by id
+  const catName = id => {
+    for (const sec of expenseSections) {
+      for (const item of sec.items) {
+        if (item.id === id) return item.name
+        if (item.subItems?.length) {
+          const si = item.subItems.find(s => s.id === id)
+          if (si) return si.name
+        }
+      }
+    }
+    return null
+  }
 
   return (
     <div className="space-y-5">
 
-      {/* ── Accounts ── */}
-      <div className="card space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Accounts</h3>
-          {totalNW > 0 && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[11px] text-gray-400">Now: <span className="font-semibold text-gray-700 dark:text-gray-300">{fmtFull(totalNW)}</span></span>
-              <span className="text-gray-300 dark:text-gray-600">→</span>
-              <span className="text-[11px] text-gray-400">12 mo: <span className={`font-semibold ${projNW >= totalNW ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>{fmtFull(projNW)}</span></span>
-              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-lg ${projNW >= totalNW ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20' : 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20'}`}>
-                {projNW >= totalNW ? '+' : '−'}{fmtFull(Math.abs(projNW - totalNW))}
-              </span>
+      {/* ── 1. ACCOUNTS + NET WORTH ROW ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {/* Compact Accounts Card */}
+        <div className="card !p-4">
+          <div className="flex items-center justify-between mb-2.5 gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Accounts</h3>
+            <div className="flex items-center gap-2">
+              {onOpenAccounts && (
+                <button onClick={onOpenAccounts}
+                  className="text-[10px] text-brand-600 dark:text-brand-400 hover:text-brand-700 border border-brand-200 dark:border-brand-800 hover:border-brand-300 rounded-lg px-2.5 py-0.5 transition-colors font-medium">
+                  Manage →
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {/* Cash & Savings */}
+            <div>
+              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Cash</p>
+              {displayCash.length === 0 ? (
+                <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {displayCash.map(a => (
+                    <div key={a.id} className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400 truncate flex-1 min-w-0">{a.name || 'Account'}</span>
+                      <span className="text-[10px] font-medium tabular-nums text-gray-700 dark:text-gray-300 flex-shrink-0">{fmtFull(accBal(a))}</span>
+                      <AcctSparkline id={a.id} balance={accBal(a)} rate={a.rate ?? 0} monthlyAdd={annualCashflow / 12 / Math.max(1, displayCash.length)} color="#10b981" volatility={dashDemo ? 0.05 : 0} />
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-gray-100 dark:border-gray-800">
+                    <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-400">Total</span>
+                    <span className="text-[10px] font-bold tabular-nums text-gray-900 dark:text-gray-100">{fmtFull(totalCash)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Investments */}
+            <div>
+              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Investments</p>
+              {displayInvestments.length === 0 ? (
+                <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {displayInvestments.map(a => (
+                    <div key={a.id} className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400 truncate flex-1 min-w-0">{a.name || 'Account'}</span>
+                      <span className="text-[10px] font-medium tabular-nums text-gray-700 dark:text-gray-300 flex-shrink-0">{fmtFull(accBal(a))}</span>
+                      <AcctSparkline id={a.id} balance={accBal(a)} rate={a.rate ?? 6} monthlyAdd={0} color="#6366f1" volatility={dashDemo ? 0.07 : 0} />
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-gray-100 dark:border-gray-800">
+                    <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-400">Total</span>
+                    <span className="text-[10px] font-bold tabular-nums text-gray-900 dark:text-gray-100">{fmtFull(totalInvestments)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Debt */}
+            <div>
+              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Debt</p>
+              {displayDebt.length === 0 ? (
+                <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {displayDebt.map(a => (
+                    <div key={a.id} className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-gray-600 dark:text-gray-400 truncate flex-1 min-w-0">{a.name || 'Debt'}</span>
+                      <span className="text-[10px] font-medium tabular-nums text-red-600 dark:text-red-400 flex-shrink-0">{fmtFull(a.balance ?? 0)}</span>
+                      <AcctSparkline id={a.id} balance={a.balance ?? 0} rate={-(a.rate ?? 5)} monthlyAdd={-(a.minPayment ?? 0)} color="#ef4444" volatility={dashDemo ? 0.04 : 0} />
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-gray-100 dark:border-gray-800">
+                    <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-400">Total</span>
+                    <span className="text-[10px] font-bold tabular-nums text-red-600 dark:text-red-400">{fmtFull(totalDebt)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Other Assets row */}
+          {displayOtherAssets.length > 0 && (
+            <div className="pt-2 mt-1 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Other Assets</p>
+                <span className="text-[10px] font-bold tabular-nums text-gray-900 dark:text-gray-100">{fmtFull(totalOtherAssets)}</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+                {displayOtherAssets.map(a => (
+                  <span key={a.id} className="text-[10px] text-gray-500 dark:text-gray-400">
+                    {a.name} <span className="font-medium text-gray-700 dark:text-gray-300">{fmtFull(a.value ?? 0)}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Cash & Savings */}
-        <AccountSection
-          label="Cash &amp; Savings"
-          accounts={cashAccounts}
-          accBal={accBal}
-          rateLabel="Interest %"
-          defaultRate={0}
-          onUpdateAccount={onUpdateCashAccount}
-          onRemoveAccount={onRemoveCashAccount}
-          onAddAccount={onAddCashAccount}
-          onAddSubAccount={onAddCashSubAccount}
-          onRemoveSubAccount={onRemoveCashSubAccount}
-          onUpdateSubAccount={onUpdateCashSubAccount}
-        />
-
-        {/* Investments */}
-        <AccountSection
-          label="Investments"
-          accounts={investmentAccounts}
-          accBal={accBal}
-          rateLabel="Return %"
-          defaultRate={6}
-          onUpdateAccount={onUpdateInvestmentAccount}
-          onRemoveAccount={onRemoveInvestmentAccount}
-          onAddAccount={onAddInvestmentAccount}
-          onAddSubAccount={onAddInvestmentSubAccount}
-          onRemoveSubAccount={onRemoveInvestmentSubAccount}
-          onUpdateSubAccount={onUpdateInvestmentSubAccount}
-        />
-
-
-      </div>
-
-      {/* ── 12-Month Summary ── */}
-      <div className="card overflow-hidden">
-        <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-3">12-Month Summary</h3>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-gray-100 dark:border-gray-800">
-                <th className="text-left py-2 px-2 text-gray-400 font-medium sticky left-0 bg-white dark:bg-gray-900 min-w-[130px] z-10">Category</th>
-                {MONTHS.map(m => <th key={m} className="text-right py-2 px-1.5 text-gray-400 font-medium w-[52px]">{m}</th>)}
-                <th className="text-right py-2 px-1.5 text-gray-400 font-medium w-[68px] border-l border-gray-100 dark:border-gray-800">Annual</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Net income row */}
-              <tr className="border-b border-gray-50 dark:border-gray-800/30">
-                <td className="py-1 px-2 sticky left-0 bg-white dark:bg-gray-900 z-10">
-                  <span className="text-[11px] font-medium text-violet-600 dark:text-violet-400">Net Income</span>
-                </td>
-                {Array(12).fill(totalNet).map((v, i) => (
-                  <td key={i} className="py-1 px-1.5 text-right">
-                    <span className={`text-[11px] tabular-nums ${v > 0 ? 'text-violet-600 dark:text-violet-400' : 'text-gray-300 dark:text-gray-700'}`}>{v > 0 ? fmtNum(v) : '—'}</span>
-                  </td>
-                ))}
-                <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                  <span className={`text-[11px] tabular-nums font-semibold ${totalNet > 0 ? 'text-violet-600 dark:text-violet-400' : 'text-gray-300'}`}>{totalNet > 0 ? fmtNum(totalNet * 12) : '—'}</span>
-                </td>
-              </tr>
-
-              {/* Spending expense sections (exclude Savings) */}
-              {(() => {
-                const SAVINGS_NAMES = new Set(['Savings', 'Saving', 'Investments'])
-                const spendSecs = expenseSections.filter(s => !SAVINGS_NAMES.has(s.name))
-                const saveSecs  = expenseSections.filter(s => SAVINGS_NAMES.has(s.name))
-
-                // Spending subtotal by month
-                const spendByMonth = Array(12).fill(0).map((_, mi) =>
-                  spendSecs.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
-                )
-                const spendAnnual = spendByMonth.reduce((s, v) => s + v, 0)
-
-                // Savings + CapEx subtotal by month
-                const saveByMonth = Array(12).fill(0).map((_, mi) =>
-                  saveSecs.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
-                )
-                const saveAnnual = saveByMonth.reduce((s, v) => s + v, 0)
-
-                return (
-                  <>
-                    {/* Spending sections */}
-                    {spendSecs.map(sec => {
-                      const secByMonth = Array(12).fill(0).map((_, mi) =>
-                        sec.items.reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
-                      )
-                      const secAnnual = secByMonth.reduce((s, v) => s + v, 0)
-                      if (!secAnnual) return null
-                      return (
-                        <tr key={sec.id} className="border-b border-gray-50 dark:border-gray-800/30">
-                          <td className="py-1 px-2 sticky left-0 bg-white dark:bg-gray-900 z-10">
-                            <span className="text-[11px] text-gray-600 dark:text-gray-400">{sec.name}</span>
-                          </td>
-                          {secByMonth.map((v, i) => (
-                            <td key={i} className="py-1 px-1.5 text-right">
-                              <span className={`text-[11px] tabular-nums ${v > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-gray-200 dark:text-gray-700'}`}>{v > 0 ? fmtNum(v) : ''}</span>
-                            </td>
-                          ))}
-                          <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                            <span className="text-[11px] tabular-nums font-medium text-amber-700 dark:text-amber-400">{fmtNum(secAnnual)}</span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-
-                    {/* Spending subtotal */}
-                    {spendAnnual > 0 && (
-                      <tr className="border-b border-gray-100 dark:border-gray-800 bg-amber-50 dark:bg-amber-950/30">
-                        <td className="py-1 px-2 sticky left-0 bg-amber-50 dark:bg-amber-950/30 z-10">
-                          <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Spending Subtotal</span>
-                        </td>
-                        {spendByMonth.map((v, i) => (
-                          <td key={i} className="py-1 px-1.5 text-right">
-                            <span className={`text-[11px] tabular-nums font-medium ${v > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-200 dark:text-gray-700'}`}>{v > 0 ? fmtNum(v) : ''}</span>
-                          </td>
-                        ))}
-                        <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                          <span className="text-[11px] tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmtNum(spendAnnual)}</span>
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Divider */}
-                    {(saveAnnual > 0 || totalCapexMo > 0) && (
-                      <tr><td colSpan={14} className="py-0.5"><div className="border-t border-dashed border-gray-200 dark:border-gray-700" /></td></tr>
-                    )}
-
-                    {/* Savings sections */}
-                    {saveSecs.map(sec => {
-                      const secByMonth = Array(12).fill(0).map((_, mi) =>
-                        sec.items.reduce((s, item) => s + (itemMonthsAgg(item)[mi] ?? 0), 0)
-                      )
-                      const secAnnual = secByMonth.reduce((s, v) => s + v, 0)
-                      if (!secAnnual) return null
-                      return (
-                        <tr key={sec.id} className="border-b border-gray-50 dark:border-gray-800/30">
-                          <td className="py-1 px-2 sticky left-0 bg-white dark:bg-gray-900 z-10">
-                            <span className="text-[11px] text-brand-600 dark:text-brand-400">{sec.name}</span>
-                          </td>
-                          {secByMonth.map((v, i) => (
-                            <td key={i} className="py-1 px-1.5 text-right">
-                              <span className={`text-[11px] tabular-nums ${v > 0 ? 'text-brand-600 dark:text-brand-400' : 'text-gray-200 dark:text-gray-700'}`}>{v > 0 ? fmtNum(v) : ''}</span>
-                            </td>
-                          ))}
-                          <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                            <span className="text-[11px] tabular-nums font-medium text-brand-600 dark:text-brand-400">{fmtNum(secAnnual)}</span>
-                          </td>
-                        </tr>
-                      )
-                    })}
-
-                    {/* CapEx row — shown as transfer to Reserve */}
-                    {totalCapexMo > 0 && (
-                      <tr className="border-b border-gray-50 dark:border-gray-800/30">
-                        <td className="py-1 px-2 sticky left-0 bg-white dark:bg-gray-900 z-10">
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400">→ CapEx Reserve</span>
-                        </td>
-                        {Array(12).fill(totalCapexMo).map((v, i) => (
-                          <td key={i} className="py-1 px-1.5 text-right">
-                            <span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500">{fmtNum(v)}</span>
-                          </td>
-                        ))}
-                        <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                          <span className="text-[11px] tabular-nums font-medium text-slate-500 dark:text-slate-400">{fmtNum(totalCapexMo * 12)}</span>
-                        </td>
-                      </tr>
-                    )}
-
-                    {/* Total expenses row */}
-                    {(totalOutflow > 0) && (
-                      <tr className="border-b border-gray-100 dark:border-gray-800 bg-amber-50/30 dark:bg-amber-900/5">
-                        <td className="py-1 px-2 sticky left-0 bg-amber-50/30 dark:bg-amber-900/5 z-10">
-                          <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">Total Outflows</span>
-                        </td>
-                        {expByMonth.map((exp, i) => {
-                          const v = exp + totalCapexMo
-                          return (
-                            <td key={i} className="py-1 px-1.5 text-right">
-                              <span className={`text-[11px] tabular-nums font-medium ${v > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-gray-200 dark:text-gray-700'}`}>{v > 0 ? fmtNum(v) : ''}</span>
-                            </td>
-                          )
-                        })}
-                        <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                          <span className="text-[11px] tabular-nums font-semibold text-amber-700 dark:text-amber-400">{fmtNum(totalOutflow * 12)}</span>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )
-              })()}
-
-              {/* Net cashflow row */}
-              <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/30">
-                <td className="py-1.5 px-2 sticky left-0 bg-gray-50/60 dark:bg-gray-800/30 z-10">
-                  <span className="text-[11px] font-bold text-gray-900 dark:text-gray-100">Net Cashflow</span>
-                </td>
-                {cashflowByMonth.map((v, i) => (
-                  <td key={i} className="py-1.5 px-1.5 text-right">
-                    <span className={`text-[11px] tabular-nums font-semibold ${v > 0 ? 'text-emerald-600 dark:text-emerald-400' : v < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-300 dark:text-gray-700'}`}>
-                      {v > 0 ? fmtNum(v) : v < 0 ? `−${fmtNum(v)}` : '—'}
-                    </span>
-                  </td>
-                ))}
-                <td className="py-1.5 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                  <span className={`text-[11px] tabular-nums font-bold ${annualCashflow > 0 ? 'text-emerald-600 dark:text-emerald-400' : annualCashflow < 0 ? 'text-red-500 dark:text-red-400' : 'text-gray-400'}`}>
-                    {annualCashflow > 0 ? fmtNum(annualCashflow) : annualCashflow < 0 ? `−${fmtNum(annualCashflow)}` : '—'}
-                  </span>
-                </td>
-              </tr>
-
-              {/* Spending cash balance (excludes Reserve) */}
-              {cashExReserve > 0 && (() => {
-                let cum = cashExReserve
-                return (
-                  <tr className="bg-gray-50/30 dark:bg-gray-800/20">
-                    <td className="py-1 px-2 sticky left-0 bg-gray-50/30 dark:bg-gray-800/20 z-10">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Cash Balance</span>
-                    </td>
-                    {spendCashflowByMonth.map((v, i) => {
-                      cum += v
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className={`text-[10px] tabular-nums ${cum >= 0 ? 'text-gray-500 dark:text-gray-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(cum)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className={`text-[10px] tabular-nums font-semibold ${(cashExReserve + spendCashflowByMonth.reduce((s, v) => s + v, 0)) >= 0 ? 'text-gray-600 dark:text-gray-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(cashExReserve + spendCashflowByMonth.reduce((s, v) => s + v, 0))}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-
-              {/* CapEx Reserve balance — tied to Reserve sub-account */}
-              {totalCapexMo > 0 && (() => {
-                let cum = reserveBal
-                return (
-                  <tr className="bg-slate-50/30 dark:bg-slate-900/10">
-                    <td className="py-1 px-2 sticky left-0 bg-slate-50/30 dark:bg-slate-900/10 z-10">
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide font-medium">CapEx Reserve</span>
-                    </td>
-                    {Array(12).fill(totalCapexMo).map((v, i) => {
-                      cum += v
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className="text-[10px] tabular-nums text-slate-500 dark:text-slate-400">{fmtNum(cum)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className="text-[10px] tabular-nums font-semibold text-slate-600 dark:text-slate-400">{fmtNum(reserveBal + totalCapexMo * 12)}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-
-              {/* Projected investment balance row */}
-              {totalInvestments > 0 && (() => {
-                const monthlyGrowthRate = investmentAccounts.reduce((s, a) => {
-                  const bal = accBal(a)
-                  return s + bal * (a.rate ?? 6) / 100
-                }, 0) / 12
-                let cum = totalInvestments
-                return (
-                  <tr className="bg-gray-50/30 dark:bg-gray-800/20">
-                    <td className="py-1 px-2 sticky left-0 bg-gray-50/30 dark:bg-gray-800/20 z-10">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Investments</span>
-                    </td>
-                    {Array(12).fill(0).map((_, i) => {
-                      cum += cum * (investmentAccounts.reduce((s, a) => s + (a.rate ?? 6), 0) / investmentAccounts.length / 100 / 12)
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400">{fmtNum(cum)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className="text-[10px] tabular-nums font-semibold text-gray-600 dark:text-gray-400">{fmtNum(projInvestments)}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-
-              {/* Net worth row — spending cash + capex reserve + investments */}
-              {totalNW > 0 && (() => {
-                let cumSpend   = cashExReserve
-                let cumReserve = reserveBal
-                const avgInvRate = investmentAccounts.length > 0
-                  ? investmentAccounts.reduce((s, a) => s + (a.rate ?? 6), 0) / investmentAccounts.length / 100 / 12
-                  : 0
-                let cumInv = totalInvestments
-                return (
-                  <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/30">
-                    <td className="py-1 px-2 sticky left-0 bg-gray-50/60 dark:bg-gray-800/30 z-10">
-                      <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Net Worth</span>
-                    </td>
-                    {spendCashflowByMonth.map((v, i) => {
-                      cumSpend += v
-                      cumReserve += totalCapexMo
-                      cumInv += cumInv * avgInvRate
-                      const nw = cumSpend + cumReserve + cumInv
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className={`text-[10px] tabular-nums font-medium ${nw >= totalNW ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(nw)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className={`text-[10px] tabular-nums font-bold ${projNW >= totalNW ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(projNW)}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-
-              {/* Projected investment balance row */}
-              {totalInvestments > 0 && (() => {
-                const monthlyGrowthRate = investmentAccounts.reduce((s, a) => {
-                  const bal = accBal(a)
-                  return s + bal * (a.rate ?? 6) / 100
-                }, 0) / 12
-                let cum = totalInvestments
-                return (
-                  <tr className="bg-gray-50/30 dark:bg-gray-800/20">
-                    <td className="py-1 px-2 sticky left-0 bg-gray-50/30 dark:bg-gray-800/20 z-10">
-                      <span className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Investments</span>
-                    </td>
-                    {Array(12).fill(0).map((_, i) => {
-                      cum += cum * (investmentAccounts.reduce((s, a) => s + (a.rate ?? 6), 0) / investmentAccounts.length / 100 / 12)
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className="text-[10px] tabular-nums text-gray-500 dark:text-gray-400">{fmtNum(cum)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className="text-[10px] tabular-nums font-semibold text-gray-600 dark:text-gray-400">{fmtNum(projInvestments)}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-
-              {/* Net worth row — spending cash + capex reserve + investments */}
-              {totalNW > 0 && (() => {
-                let cumSpend   = cashExReserve
-                let cumReserve = reserveBal
-                const avgInvRate = investmentAccounts.length > 0
-                  ? investmentAccounts.reduce((s, a) => s + (a.rate ?? 6), 0) / investmentAccounts.length / 100 / 12
-                  : 0
-                let cumInv = totalInvestments
-                return (
-                  <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/30">
-                    <td className="py-1 px-2 sticky left-0 bg-gray-50/60 dark:bg-gray-800/30 z-10">
-                      <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Net Worth</span>
-                    </td>
-                    {spendCashflowByMonth.map((v, i) => {
-                      cumSpend += v
-                      cumReserve += totalCapexMo
-                      cumInv += cumInv * avgInvRate
-                      const nw = cumSpend + cumReserve + cumInv
-                      return (
-                        <td key={i} className="py-1 px-1.5 text-right">
-                          <span className={`text-[10px] tabular-nums font-medium ${nw >= totalNW ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(nw)}</span>
-                        </td>
-                      )
-                    })}
-                    <td className="py-1 px-1.5 text-right border-l border-gray-100 dark:border-gray-800">
-                      <span className={`text-[10px] tabular-nums font-bold ${projNW >= totalNW ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{fmtNum(projNW)}</span>
-                    </td>
-                  </tr>
-                )
-              })()}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Cash Balance Chart — 30-year projection ── */}
-      {(cashExReserve > 0 || totalCapexMo > 0) && (() => {
-        const PROJ_YEARS = 30
-        const baseYear   = new Date().getFullYear()
-        const annualCash = spendCashflowByMonth.reduce((s, v) => s + v, 0)
-        let cumCash = cashExReserve
-        const cashData = [{ month: 'Now', value: cumCash }]
-        for (let y = 1; y <= PROJ_YEARS; y++) {
-          cumCash += annualCash
-          cashData.push({ month: String(baseYear + y), value: Math.round(cumCash) })
-        }
-        const cashStart  = cashData[0].value
-        const cashEnd    = cashData[cashData.length - 1].value
-        const cashDelta  = cashEnd - cashStart
-        const isUp       = cashDelta >= 0
-        const stroke     = isUp ? '#6366f1' : '#f87171'
-        const gradColor  = stroke
-        const axisColor  = darkMode ? '#6b7280' : '#9ca3af'
-        return (
-          <div className="card">
-            <div className="flex items-start justify-between mb-1">
-              <div>
-                <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wide font-medium">Cash Balance · 30-Year Outlook</p>
-                <p className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums leading-tight">{fmtFull(cashEnd)}</p>
-              </div>
-              <div className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold tabular-nums ${isUp ? 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-900/20' : 'text-red-500 bg-red-50 dark:text-red-400 dark:bg-red-900/20'}`}>
-                <span>{isUp ? '↑' : '↓'}</span>
-                <span>{isUp ? '+' : '−'}{fmtFull(Math.abs(cashDelta))}</span>
-              </div>
-            </div>
-            <ResponsiveContainer width="100%" height={120}>
-              <AreaChart data={cashData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-                <defs>
-                  <linearGradient id="gradAppleCash30" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={gradColor} stopOpacity={0.20} />
-                    <stop offset="100%" stopColor={gradColor} stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="month" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} interval={4} />
-                <YAxis hide domain={['dataMin - 500', 'dataMax + 500']} />
-                <ReTooltip
-                  formatter={v => [fmtFull(v), 'Cash Balance']}
-                  contentStyle={{ background: darkMode ? '#111827' : '#fff', border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`, borderRadius: '0.75rem', fontSize: 11, padding: '6px 10px' }}
-                  cursor={{ stroke: axisColor, strokeDasharray: '3 3' }}
-                />
-                <Area type="monotone" dataKey="value" stroke={stroke} fill="url(#gradAppleCash30)" strokeWidth={2} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )
-      })()}
-
-      {/* ── CapEx Reserve — draggable 30-year projection with expenditure spikes ── */}
-      {(reserveBal > 0 || totalCapexMo > 0 || capex.some(g => g.items?.length > 0)) && (
-        <CapExProjectionChart capex={capex} reserveBal={reserveBal} darkMode={darkMode}
-          projYears={Math.max(5, lifeExpectancy - currentAge)} />
-      )}
-
-      {/* ── Cash & Reserve Balance Chart ── */}
-      {(cashExReserve > 0 || reserveBal > 0 || totalCapexMo > 0) && (() => {
-        let cumCash = cashExReserve
-        let cumRes  = reserveBal
-        const chartData = [{ month: 'Now', cash: cumCash, reserve: cumRes }]
-        MONTHS.forEach((m, i) => {
-          cumCash += spendCashflowByMonth[i]
-          cumRes  += totalCapexMo
-          chartData.push({ month: m, cash: Math.round(cumCash), reserve: Math.round(cumRes) })
-        })
-        return (
-          <div className="card">
-            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-3">Cash & Reserve Balances</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
-                <defs>
-                  <linearGradient id="gradCash" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.15} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="gradReserve" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#94a3b8" stopOpacity={0.15} />
-                    <stop offset="100%" stopColor="#94a3b8" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
-                <XAxis dataKey="month" tick={{ fontSize: 10, fill: darkMode ? '#9ca3af' : '#6b7280' }} axisLine={false} tickLine={false} />
-                <YAxis tickFormatter={v => v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v}`} tick={{ fontSize: 10, fill: darkMode ? '#9ca3af' : '#6b7280' }} axisLine={false} tickLine={false} width={48} />
-                <ReTooltip
-                  formatter={(v, name) => [fmtFull(v), name === 'cash' ? 'Cash Balance' : 'CapEx Reserve']}
-                  contentStyle={{ background: darkMode ? '#111827' : '#fff', border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`, borderRadius: '0.75rem', fontSize: 11, padding: '8px 12px' }}
-                  cursor={{ stroke: darkMode ? '#374151' : '#d1d5db', strokeDasharray: '3 3' }}
-                />
-                <Area type="monotone" dataKey="cash" name="cash" stroke="#6366f1" fill="url(#gradCash)" strokeWidth={2} dot={false} />
-                <Area type="monotone" dataKey="reserve" name="reserve" stroke="#94a3b8" fill="url(#gradReserve)" strokeWidth={2} dot={false} />
-                <Legend
-                  verticalAlign="top" align="right" height={24}
-                  formatter={v => <span className="text-[10px] text-gray-500 dark:text-gray-400">{v === 'cash' ? 'Cash Balance' : 'CapEx Reserve'}</span>}
-                  iconSize={8}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )
-      })()}
-
-
-
-      {/* ── Room Tracker (Feature 6) ── */}
-      {(() => {
-        const currentYear = new Date().getFullYear()
-        const inflation = retirementInputs.inflation ?? 2.5
-        const tfsaIndexed = retirementInputs.tfsaIndexedToInflation ?? false
-        const tfsaLimit = calcTfsaLimit(currentYear, inflation, tfsaIndexed)
-        const tfsaContrib = retirementInputs.accounts?.find(a => a.taxType === 'tfsa')?.annualContribution ?? 0
-        const tfsaRemaining = Math.max(0, tfsaLimit - tfsaContrib)
-
-        const rrspLimit = Math.min(31560, Math.round((retirementInputs.cppAvgEarnings ?? 0) * 0.18))
-        const rrspContrib = (retirementInputs.accounts?.find(a => a.taxType === 'rrif')?.annualContribution ?? 0)
-        const rrspRemaining = Math.max(0, rrspLimit - rrspContrib)
-
-        const marginalRate = retirementInputs.workingMarginalRate ?? 40
-        const recommendation = marginalRate > 40
-          ? 'Your marginal rate is high — prioritize RRSP contributions for maximum tax deferral.'
-          : marginalRate < 30
-          ? 'Your marginal rate is low — favour TFSA contributions to shelter future tax-free growth.'
-          : 'Split contributions between RRSP and TFSA for balanced tax optimization.'
-
-        return (
-          <div className="border border-gray-100 dark:border-gray-800 rounded-xl p-2.5 bg-white dark:bg-gray-800/50">
-            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-3">RRSP / TFSA Room Tracker</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* TFSA */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">TFSA ({currentYear})</p>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">Annual limit</span>
-                  <span className="text-[11px] font-semibold tabular-nums text-gray-700 dark:text-gray-300">{fmtFull(tfsaLimit)}</span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">Contributing</span>
-                  <span className="text-[11px] tabular-nums text-brand-600 dark:text-brand-400">{fmtFull(tfsaContrib)}</span>
-                </div>
-                <div className="flex items-baseline justify-between border-t border-gray-100 dark:border-gray-800 pt-1">
-                  <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Remaining room</span>
-                  <span className={`text-[11px] font-semibold tabular-nums ${tfsaRemaining > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>{fmtFull(tfsaRemaining)}</span>
-                </div>
-                {tfsaIndexed && <p className="text-[10px] text-gray-400">Indexed to inflation at {inflation}%</p>}
-              </div>
-
-              {/* RRSP */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">RRSP (Est.)</p>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">Est. deduction limit</span>
-                  <span className="text-[11px] font-semibold tabular-nums text-gray-700 dark:text-gray-300">{fmtFull(rrspLimit)}</span>
-                </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">Contributing</span>
-                  <span className="text-[11px] tabular-nums text-brand-600 dark:text-brand-400">{fmtFull(rrspContrib)}</span>
-                </div>
-                <div className="flex items-baseline justify-between border-t border-gray-100 dark:border-gray-800 pt-1">
-                  <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Remaining room</span>
-                  <span className={`text-[11px] font-semibold tabular-nums ${rrspRemaining > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-400'}`}>{fmtFull(rrspRemaining)}</span>
-                </div>
-                <p className="text-[10px] text-gray-400">18% of prior-year earnings, max $31,560</p>
-              </div>
-            </div>
-
-            {/* Recommendation */}
-            <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-800">
-              <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
-                Optimal Split · Marginal Rate: {marginalRate}%
+        {/* Net Worth Chart Card */}
+        <div className="card !p-4">
+          <div className="flex items-start justify-between mb-2 gap-3 flex-wrap">
+            <div>
+              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">Net Worth</p>
+              <p className={`text-xl font-bold tabular-nums ${totalNW >= 0 ? 'text-gray-900 dark:text-gray-100' : 'text-red-600 dark:text-red-400'}`}>
+                {totalNW < 0 ? '−' : ''}{fmtFull(Math.abs(totalNW))}
               </p>
-              <p className="text-[11px] text-gray-600 dark:text-gray-300">{recommendation}</p>
+              <p className="text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">
+                Assets {fmtFull(totalCash + totalInvestments + totalOtherAssets)}
+                {totalDebt > 0 && <span className="ml-2">Debt <span className="text-red-500">{fmtFull(totalDebt)}</span></span>}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              {[['#10b981', 'Assets'], ['#ef4444', 'Debt'], ['#3b82f6', 'Net Worth']].map(([color, label]) => (
+                <span key={label} className="flex items-center gap-1 text-[9px] text-gray-400 dark:text-gray-500">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                  {label}
+                </span>
+              ))}
             </div>
           </div>
-        )
-      })()}
+          <ResponsiveContainer width="100%" height={130}>
+            <ComposedChart data={nwChartData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="gradNWAssets" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.2} />
+                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="year" tick={{ fontSize: 8, fill: axisColor }} axisLine={false} tickLine={false} />
+              <YAxis hide domain={['dataMin - 5000', 'dataMax + 5000']} />
+              <ReTooltip
+                contentStyle={tooltipStyle}
+                formatter={(value, name) => [
+                  `$${fmtNum(Math.round(Math.abs(value)))}`,
+                  { assets: 'Assets', liabilities: 'Debt', netWorth: 'Net Worth' }[name] ?? name,
+                ]}
+                cursor={{ stroke: axisColor, strokeDasharray: '3 3' }}
+              />
+              <Area type="monotone" dataKey="assets"      stroke="#10b981" strokeWidth={1.5} fill="url(#gradNWAssets)" dot={false} />
+              <Area type="monotone" dataKey="liabilities" stroke="#ef4444" strokeWidth={1.5} fill="none" dot={false} />
+              <Area type="monotone" dataKey="netWorth"    stroke="#3b82f6" strokeWidth={2}   fill="none" dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
 
-      {/* ── Budget vs Actual (Feature 4) ── */}
-      {(() => {
-        const hasActual = expenseSections.some(sec =>
-          sec.items.some(item => {
-            const directSum = (item.actualMonths ?? []).reduce((s, v) => s + v, 0)
-            const subSum = (item.subItems ?? []).reduce((ss, si) => ss + (si.actualMonths ?? []).reduce((s2, v) => s2 + v, 0), 0)
-            return directSum + subSum > 0
-          })
-        )
-        if (!hasActual) return null
+      </div>
 
+      {/* ── 2. INCOME SUMMARY + SANKEY/BUDGET ROW ── */}
+
+      {/* Income summary bar */}
+      {incomes.length > 0 && (() => {
+        const enabledInc = incomes.filter(i => i.enabled !== false)
         return (
-          <div className="border border-gray-100 dark:border-gray-800 rounded-xl p-2.5 bg-white dark:bg-gray-800/50">
-            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-3">Budget vs Actual</h3>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-gray-400 font-medium uppercase tracking-wider pb-1 border-b border-gray-100 dark:border-gray-800">
-                <span>Section</span>
-                <div className="flex items-center gap-6">
-                  <span>Planned</span>
-                  <span>Actual</span>
-                  <span>Variance</span>
-                </div>
-              </div>
-              {expenseSections.map(sec => {
-                const planned = sec.items.reduce((s, item) => s + avgMonthly(item), 0)
-                const actual = sec.items.reduce((s, item) => {
-                  if (item.subItems?.length > 0) {
-                    return s + item.subItems.reduce((ss, si) =>
-                      ss + (si.actualMonths ?? Array(12).fill(0)).reduce((sv, v) => sv + v, 0) / 12, 0)
-                  }
-                  return s + (item.actualMonths ?? Array(12).fill(0)).reduce((sv, v) => sv + v, 0) / 12
-                }, 0)
-                if (planned === 0 && actual === 0) return null
-                const variance = planned - actual
-                const isUnder = variance >= 0
+          <div className="card !py-2.5">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider flex-shrink-0">Income</span>
+              {enabledInc.map(inc => {
+                const calc = calcIncomeNet(inc, province)
                 return (
-                  <div key={sec.id} className="flex items-center justify-between text-[11px]">
-                    <span className="text-gray-600 dark:text-gray-400">{sec.name}</span>
-                    <div className="flex items-center gap-6 tabular-nums">
-                      <span className="text-gray-500 dark:text-gray-400 w-20 text-right">{fmtFull(planned)}</span>
-                      <span className="text-gray-700 dark:text-gray-300 w-20 text-right">{actual > 0 ? fmtFull(actual) : '—'}</span>
-                      <span className={`w-20 text-right font-medium ${actual > 0 ? (isUnder ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400') : 'text-gray-300 dark:text-gray-700'}`}>
-                        {actual > 0 ? `${isUnder ? '−' : '+'}${fmtFull(Math.abs(variance))}` : '—'}
-                      </span>
-                    </div>
+                  <div key={inc.id} className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">{inc.name || 'Income'}</span>
+                    <span className="text-[11px] tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold">{fmtFull(calc.net)}<span className="text-[9px] text-gray-400 font-normal">/mo net</span></span>
                   </div>
                 )
               })}
+              <div className="ml-auto flex items-center gap-3 flex-shrink-0">
+                <span className="text-[10px] text-gray-400">Gross <span className="text-gray-600 dark:text-gray-300 font-semibold tabular-nums">{fmtFull(totalGross)}</span></span>
+                <span className="text-[10px] text-gray-400">Tax <span className="text-rose-500 font-semibold tabular-nums">{fmtFull(totalGross - totalNet)}</span></span>
+                <span className="text-[10px] text-gray-400">Net <span className="text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">{fmtFull(totalNet)}</span></span>
+              </div>
             </div>
           </div>
         )
       })()}
 
-      {/* ── Charts ── */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+      {/* Sankey + Budget Progress side-by-side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+        {/* ── Sankey Card ── */}
         <div className="card">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-4">Expense Breakdown</h3>
-          {pieData.length > 0 ? (
-            <div className="flex items-center gap-4">
-              <div style={{ width: 170, height: 170, flexShrink: 0 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={48} outerRadius={76} paddingAngle={2} dataKey="value">
-                      {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                    </Pie>
-                    <ReTooltip content={<DonutTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                {pieData.slice(0, 9).map((d, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: d.color }} />
-                    <span className="flex-1 min-w-0 truncate text-gray-600 dark:text-gray-400">{d.name}</span>
-                    <span className="font-medium text-gray-900 dark:text-gray-200 tabular-nums flex-shrink-0">{fmtFull(d.value)}</span>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow · {selLbl}</h3>
+            {/* Hover dropdown period selector */}
+            <div className="relative group">
+              <button className="flex items-center gap-1 text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2.5 py-1 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors select-none">
+                {selLbl} <span className="text-gray-400">▾</span>
+              </button>
+              <div className="absolute right-0 top-full pt-1 z-30 hidden group-hover:block">
+                <div className="bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-2 min-w-[170px]">
+                  {/* Annual */}
+                  <button
+                    onMouseDown={() => setSelPeriod({ type: 'annual' })}
+                    className={`w-full text-left text-[11px] px-2 py-1 rounded-lg mb-1 font-medium transition-colors
+                      ${selPeriod.type === 'annual' ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300'}`}
+                  >Annual</button>
+                  {/* Quarters */}
+                  <div className="grid grid-cols-4 gap-0.5 mb-1">
+                    {[1,2,3,4].map(q => (
+                      <button
+                        key={q}
+                        onMouseDown={() => setSelPeriod({ type: 'quarter', q })}
+                        className={`text-[10px] font-medium py-0.5 rounded-md transition-colors
+                          ${selPeriod.type === 'quarter' && selPeriod.q === q ? 'bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400'}`}
+                      >Q{q}</button>
+                    ))}
                   </div>
-                ))}
-                {pieData.length > 9 && <p className="text-[10px] text-gray-400">+{pieData.length - 9} more</p>}
+                  {/* Months grid */}
+                  <div className="grid grid-cols-3 gap-0.5">
+                    {MONTHS.map((m, mi) => {
+                      const isActive = selPeriod.type === 'month' && selPeriod.month === mi
+                      const isCurrent = mi === now.getMonth() && planYear === now.getFullYear()
+                      return (
+                        <button
+                          key={m}
+                          onMouseDown={() => setSelPeriod({ type: 'month', month: mi })}
+                          className={`text-[10px] font-medium py-0.5 rounded-md transition-colors relative
+                            ${isActive ? 'bg-brand-600 text-white' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'}`}
+                        >
+                          {m}
+                          {isCurrent && !isActive && <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-0.5 h-0.5 rounded-full bg-brand-500" />}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
-          ) : <p className="text-xs text-gray-400 text-center py-8">Add expenses to see breakdown</p>}
+          </div>
+          <BudgetSankey
+            expenseSections={expenseSections}
+            capex={capex}
+            totalNet={totalNet}
+            transactions={effectiveTxns}
+            planYear={planYear}
+            periodMos={selMIs}
+            periodLabel={selLbl}
+            darkMode={darkMode}
+            showActual={hasTxns}
+          />
         </div>
 
-        <div className="card">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-4">Monthly Overview</h3>
-          <ResponsiveContainer width="100%" height={170}>
-            <BarChart data={barData} margin={{ top: 4, right: 4, bottom: 4, left: 8 }} barSize={40}>
-              <CartesianGrid vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
-              <XAxis dataKey="label" tick={{ fontSize: 11, fill: darkMode ? '#9ca3af' : '#6b7280' }} axisLine={false} tickLine={false} />
-              <YAxis tickFormatter={v => v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v}`} tick={{ fontSize: 10, fill: darkMode ? '#9ca3af' : '#6b7280' }} axisLine={false} tickLine={false} width={48} />
-              <ReTooltip formatter={v => [fmtFull(v)]} contentStyle={{ background: darkMode ? '#111827' : '#fff', border: `1px solid ${darkMode ? '#374151' : '#e5e7eb'}`, borderRadius: '0.75rem', fontSize: 12, padding: '8px 12px' }} cursor={{ fill: 'transparent' }} />
-              <Bar dataKey="value" radius={[4, 4, 0, 0]}>{barData.map((d, i) => <Cell key={i} fill={d.fill} />)}</Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        {/* ── Budget Progress (right column) ── */}
+        {(() => {
+          const leafItems = allLeafItems(expenseSections)
+          const colorMap  = {}
+          leafItems.forEach((item, i) => { colorMap[item.id] = COLORS[i % COLORS.length] })
+          const rows = []
+          for (const sec of expenseSections) {
+            const secItems = sec.items.flatMap(item => item.subItems?.length ? item.subItems : [item])
+            const secRows = secItems
+              .map(item => {
+                const plan   = selMIs.reduce((s, mi) => s + (itemMonths(item, planYear)[mi] ?? 0), 0)
+                const actual = hasTxns ? selMIs.reduce((s, mi) => s + (actualByCat[item.id]?.[mi] ?? 0), 0) : 0
+                if (plan === 0 && actual === 0) return null
+                return { item, sec, plan, actual }
+              })
+              .filter(Boolean)
+            if (secRows.length > 0) rows.push({ sec, secRows })
+          }
+          return (
+            <div className="card overflow-y-auto" style={{ maxHeight: 420 }}>
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                  Budget · {selLbl}
+                </h3>
+                {!hasTxns && (
+                  <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+                    Add transactions to track actuals
+                  </p>
+                )}
+              </div>
+              {rows.length === 0 ? (
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center py-6">
+                  No budget items planned for {selLbl}
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {rows.map(({ sec, secRows }) => (
+                    <div key={sec.id}>
+                      <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">
+                        {sec.name}
+                      </p>
+                      <div className="space-y-2">
+                        {secRows.map(({ item, plan, actual }) => {
+                          const barPct  = plan > 0 ? Math.min(100, (actual / plan) * 100) : (actual > 0 ? 100 : 0)
+                          const ratio   = plan > 0 ? actual / plan : 0
+                          const barColor = ratio >= 1 ? '#ef4444' : ratio >= 0.8 ? '#f59e0b' : '#10b981'
+                          const dot     = colorMap[item.id] ?? '#6366f1'
+                          return (
+                            <div key={item.id}>
+                              <div className="flex items-center justify-between mb-1 gap-2">
+                                <span className="flex items-center gap-1.5 text-[11px] text-gray-700 dark:text-gray-300 min-w-0">
+                                  <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ background: dot }} />
+                                  <span className="truncate">{item.name}</span>
+                                </span>
+                                <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400 flex-shrink-0">
+                                  {hasTxns && actual > 0 ? (
+                                    <Fragment>
+                                      <span className={ratio >= 1 ? 'text-red-500 dark:text-red-400 font-medium' : ratio >= 0.8 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-700 dark:text-gray-300'}>
+                                        {fmtFull(actual)}
+                                      </span>
+                                      {' / '}
+                                      <span>{fmtFull(plan)}</span>
+                                    </Fragment>
+                                  ) : (
+                                    <span>{fmtFull(plan)}</span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-300" style={{ width: `${barPct}%`, background: barColor }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })()}
+
+      </div>{/* end 2-col grid */}
+
+      {/* ── 3. FOUR STAT TILES ── */}
+      {(() => {
+        const tiles = [
+          {
+            label: 'Net Income',
+            value: fmtFull(periodInc),
+            sub: selLbl,
+            color: 'text-violet-600 dark:text-violet-400',
+            bg: 'bg-violet-50 dark:bg-violet-900/20',
+            dot: '#8b5cf6',
+          },
+          {
+            label: `Planned · ${selLbl}`,
+            value: fmtFull(periodExp),
+            sub: 'spending',
+            color: 'text-amber-600 dark:text-amber-400',
+            bg: 'bg-amber-50 dark:bg-amber-900/20',
+            dot: '#f59e0b',
+          },
+          {
+            label: 'Remaining',
+            value: (periodCf < 0 ? '−' : '') + fmtFull(Math.abs(periodCf)),
+            sub: selLbl,
+            color: periodCf >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
+            bg: periodCf >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-red-50 dark:bg-red-900/20',
+            dot: periodCf >= 0 ? '#10b981' : '#ef4444',
+          },
+          {
+            label: 'Savings Rate',
+            value: pct(savingsRate),
+            sub: 'of net income',
+            color: 'text-indigo-600 dark:text-indigo-400',
+            bg: 'bg-indigo-50 dark:bg-indigo-900/20',
+            dot: '#6366f1',
+          },
+        ]
+        return (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {tiles.map(t => (
+              <div key={t.label} className="card flex flex-col gap-1">
+                <span className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+                  <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.dot }} />
+                  {t.label}
+                </span>
+                <p className={`text-xl font-bold tabular-nums ${t.color}`}>{t.value}</p>
+                <p className="text-[11px] text-gray-400 dark:text-gray-500">{t.sub}</p>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* ── 4. CASH FLOW CHART ── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+            Cash Flow · {planYear}
+          </h3>
+          <div className="flex items-center gap-3">
+            {[['#10b981', 'Surplus'], ['#ef4444', 'Deficit'], ['#6b7280', 'Spending']].map(([color, label]) => (
+              <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
+                <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
+                {label}
+              </span>
+            ))}
+          </div>
         </div>
+        <ResponsiveContainer width="100%" height={180}>
+          <ComposedChart data={cashflowChartData} barCategoryGap="40%" margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id="cfGradPos" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="#10b981" stopOpacity={0.18} />
+                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="cfGradNeg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor="#ef4444" stopOpacity={0} />
+                <stop offset="100%" stopColor="#ef4444" stopOpacity={0.15} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
+            <XAxis dataKey="month" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={yFmt} width={46} />
+            <ReTooltip
+              contentStyle={tooltipStyle}
+              formatter={(value, name) => {
+                const labels = { cashflow: 'Net Cashflow', spending: 'Spending', income: 'Income' }
+                return [`$${fmtNum(Math.round(Math.abs(value)))}`, labels[name] ?? name]
+              }}
+            />
+            <ReferenceLine y={0} stroke={darkMode ? '#374151' : '#e5e7eb'} strokeWidth={1} />
+            <Bar dataKey="cashflow" name="cashflow" maxBarSize={18} radius={[3, 3, 3, 3]}>
+              {cashflowChartData.map((entry, i) => (
+                <Cell key={i} fill={entry.cashflow >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.85} />
+              ))}
+            </Bar>
+            <Line
+              type="monotone"
+              dataKey="spending"
+              name="spending"
+              stroke={darkMode ? '#9ca3af' : '#6b7280'}
+              strokeWidth={1.5}
+              dot={false}
+              activeDot={{ r: 3, strokeWidth: 0 }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
+
+      {/* ── 6. RECENT TRANSACTIONS ── */}
+      {recentTxns.length > 0 && (
+        <div className="card">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Recent Transactions</h3>
+          </div>
+          <div className="space-y-0">
+            {recentTxns.map((t, i) => {
+              const d     = new Date(t.date + 'T00:00:00')
+              const dateStr = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+              const name  = t.categoryId ? (catName(t.categoryId) ?? 'Unassigned') : 'Unassigned'
+              const amt   = t.amount ?? 0
+              const isPos = amt >= 0
+              return (
+                <div key={t.id ?? i} className={`flex items-center gap-3 py-2 text-[11px] ${i < recentTxns.length - 1 ? 'border-b border-gray-50 dark:border-gray-800/50' : ''}`}>
+                  <span className="tabular-nums text-gray-400 dark:text-gray-500 flex-shrink-0 w-9">{dateStr}</span>
+                  <span className="text-gray-500 dark:text-gray-400 flex-shrink-0 w-24 truncate">{name}</span>
+                  <span className="flex-1 min-w-0 text-gray-600 dark:text-gray-400 truncate">{t.description ?? t.memo ?? ''}</span>
+                  <span className={`tabular-nums font-medium flex-shrink-0 ${isPos ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                    {isPos ? '+' : ''}{fmtFull(amt)}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-3 italic">View all in the Expense Tracker tab</p>
+        </div>
+      )}
+
     </div>
   )
 }
 
 // ─── Main BudgetApp ───────────────────────────────────────────────────────────
 
-export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard', onTabChange, lifeExpectancy = 90, currentAge = 40, retirementInputs = {} }) {
-  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [] } = budget
+export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard', onTabChange, lifeExpectancy = 90, currentAge = 40, retirementInputs = {}, onOpenAccounts, demoMode = false }) {
+  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [], debtAccounts = [], transactions = [], otherAssets = [] } = budget
+
+  const [planYear, setPlanYear] = useState(new Date().getFullYear())
 
   function upd(key, fn) { onChange({ ...budget, [key]: fn(budget[key] ?? []) }) }
   function set(key, val){ onChange({ ...budget, [key]: val }) }
@@ -2588,11 +2698,34 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
   const addSection       = ()          => upd('expenseSections', p => [...p, { id: nextId('s'), name: 'New Section', items: [] }])
   const removeSection    = sid         => upd('expenseSections', p => p.filter(s => s.id !== sid))
   const updateSection    = (sid,f,v)   => upd('expenseSections', p => p.map(s => s.id === sid ? { ...s, [f]: v } : s))
+  const reorderSections  = (fromId, toId) => upd('expenseSections', p => {
+    const arr = [...p]
+    const fi = arr.findIndex(s => s.id === fromId)
+    const ti = arr.findIndex(s => s.id === toId)
+    if (fi === -1 || ti === -1 || fi === ti) return p
+    const [moved] = arr.splice(fi, 1)
+    arr.splice(ti, 0, moved)
+    return arr
+  })
+  const reorderItems     = (sid, fromId, toId) => upd('expenseSections', p => p.map(s => {
+    if (s.id !== sid) return s
+    const arr = [...s.items]
+    const fi = arr.findIndex(i => i.id === fromId)
+    const ti = arr.findIndex(i => i.id === toId)
+    if (fi === -1 || ti === -1 || fi === ti) return s
+    const [moved] = arr.splice(fi, 1)
+    arr.splice(ti, 0, moved)
+    return { ...s, items: arr }
+  }))
   const addItem          = sid         => upd('expenseSections', p => p.map(s => s.id === sid ? { ...s, items: [...s.items, { id: nextId('e'), name: 'New Item', months: Array(12).fill(0), subItems: [] }] } : s))
   const removeItem       = (sid,iid)   => upd('expenseSections', p => p.map(s => s.id === sid ? { ...s, items: s.items.filter(i => i.id !== iid) } : s))
   const updateItem       = (sid,iid,f,v) => upd('expenseSections', p => p.map(s => s.id === sid ? { ...s, items: s.items.map(i => i.id === iid ? { ...i, [f]: v } : i) } : s))
   const updateItemMonth  = (sid,iid,mi,val) => upd('expenseSections', p => p.map(s => s.id === sid
-    ? { ...s, items: s.items.map(i => { if (i.id !== iid) return i; const m = [...itemMonths(i)]; m[mi] = val; return { ...i, months: m } }) } : s))
+    ? { ...s, items: s.items.map(i => {
+        if (i.id !== iid) return i
+        const m = [...itemMonths(i, planYear)]; m[mi] = val
+        return { ...i, monthsByYear: { ...(i.monthsByYear ?? {}), [planYear]: m } }
+      })} : s))
 
   // ── Expense sub-items ──
   const addSubItem = (sid, iid) => upd('expenseSections', p => p.map(s => s.id === sid
@@ -2617,7 +2750,8 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
         if (i.id !== iid) return i
         return { ...i, subItems: (i.subItems ?? []).map(si => {
           if (si.id !== siid) return si
-          const m = [...itemMonths(si)]; m[mi] = val; return { ...si, months: m }
+          const m = [...itemMonths(si, planYear)]; m[mi] = val
+          return { ...si, monthsByYear: { ...(si.monthsByYear ?? {}), [planYear]: m } }
         })}
       })} : s))
 
@@ -2654,6 +2788,25 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
 
   // ── CapEx (one card per item, single internal group) ──
   const _ensureCg = p => p.length > 0 ? p : [{ id: nextId('cg'), name: 'Capital Expenses', items: [] }]
+  const optimizeCapexContribs = (apply = true) => upd('capex', p => p.map(g => ({
+    ...g,
+    items: (g.items ?? []).map(item => {
+      if (!apply) {
+        // Reset: remove monthlyContrib from item and all sub-items
+        const { monthlyContrib: _mc, ...rest } = item
+        return { ...rest, subItems: (item.subItems ?? []).map(si => { const { monthlyContrib: _smc, ...sr } = si; return sr }) }
+      }
+      if (item.subItems?.length > 0) {
+        return { ...item, subItems: item.subItems.map(si => ({
+          ...si, monthlyContrib: si.intervalYears > 0
+            ? Math.round(sinkingFundPMT(si.cost, si.intervalYears, item.returnRate ?? 3) * 100) / 100 : 0
+        }))}
+      }
+      return item.enabled !== false && item.intervalYears > 0
+        ? { ...item, monthlyContrib: Math.round(sinkingFundPMT(item.cost, item.intervalYears, item.returnRate ?? 3) * 100) / 100 }
+        : item
+    })
+  })))
   const addCapexItem    = ()       => upd('capex', p => { const gs = _ensureCg(p); const g = gs[0]; return [{ ...g, items: [...(g.items ?? []), { id: nextId('cx'), name: 'New Item', cost: 5000, intervalYears: 5, reserveBalance: 0, returnRate: 3, enabled: true, subItems: [] }] }] })
   const removeCapexItem = id       => upd('capex', p => p.map(g => ({ ...g, items: (g.items ?? []).filter(c => c.id !== id) })))
   const updateCapexItem = (id,f,v) => upd('capex', p => p.map(g => ({ ...g, items: (g.items ?? []).map(c => c.id === id ? { ...c, [f]: v } : c) })))
@@ -2688,8 +2841,12 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
   const totalTax      = enabledCalcs.reduce((s, c) => s + c.tax,   0)
   const totalNet      = enabledCalcs.reduce((s, c) => s + c.net,   0)
 
+  const reserveBal    = cashAccounts.reduce((s, a) => {
+    if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name === 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
+    return s
+  }, 0)
   const leafItems     = allLeafItems(expenseSections)
-  const totalExpenses = expenseSections.flatMap(s => s.items).reduce((s, i) => s + avgMonthly(i), 0)
+  const totalExpenses = expenseSections.flatMap(s => s.items).reduce((s, i) => s + avgMonthly(i, planYear), 0)
   const totalCapexMo  = flatCapexItems(capex).reduce((s, c) => s + capexMonthly(c), 0)
   const totalOutflow  = totalExpenses + totalCapexMo
   const netCashflow   = totalNet - totalOutflow
@@ -2700,7 +2857,7 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
   leafItems.forEach((item, idx) => { itemColorMap[item.id] = idx % COLORS.length })
 
   const pieData = [
-    ...leafItems.filter(e => leafAvg(e) > 0).map(e => ({ name: e.name, value: leafAvg(e), color: COLORS[itemColorMap[e.id] ?? 0] })),
+    ...leafItems.filter(e => leafAvg(e, planYear) > 0).map(e => ({ name: e.name, value: leafAvg(e, planYear), color: COLORS[itemColorMap[e.id] ?? 0] })),
     ...flatCapexItems(capex).filter(c => c.enabled && capexMonthly(c) > 0).map(c => ({ name: `${c.name} Reserve`, value: capexMonthly(c), color: CAPEX_COLOR })),
   ].sort((a, b) => b.value - a.value)
 
@@ -2713,13 +2870,15 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      {/* Content */}
+
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
         {tab === 'dashboard' && (
           <DashboardTab
             totalGross={totalGross} totalNet={totalNet} totalExpenses={totalExpenses}
             totalCapexMo={totalCapexMo} totalOutflow={totalOutflow} netCashflow={netCashflow}
-            savingsRate={savingsRate} expenseSections={expenseSections}
+            savingsRate={savingsRate} expenseSections={expenseSections} planYear={planYear}
+            incomes={incomes} province={province}
+            transactions={transactions} debtAccounts={debtAccounts}
             capex={capex} pieData={pieData} barData={barData} darkMode={darkMode}
             lifeExpectancy={lifeExpectancy} currentAge={currentAge}
             cashAccounts={cashAccounts} investmentAccounts={investmentAccounts}
@@ -2728,6 +2887,9 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
             onAddInvestmentAccount={addInvestmentAccount} onRemoveInvestmentAccount={removeInvestmentAccount} onUpdateInvestmentAccount={updateInvestmentAccount}
             onAddInvestmentSubAccount={addInvestmentSubAccount} onRemoveInvestmentSubAccount={removeInvestmentSubAccount} onUpdateInvestmentSubAccount={updateInvestmentSubAccount}
             retirementInputs={retirementInputs}
+            onOpenAccounts={onOpenAccounts}
+            dashDemo={demoMode}
+            otherAssets={otherAssets}
           />
         )}
         {tab === 'income' && (
@@ -2738,17 +2900,15 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
             onSetProvince={v => set('province', v)}
           />
         )}
-        {tab === 'expenses' && (
+        {tab === 'plan' && (
           <ExpensesTab
             expenseSections={expenseSections} capex={capex} totalNet={totalNet}
             totalExpenses={totalExpenses} totalCapexMo={totalCapexMo} totalOutflow={totalOutflow}
-            itemColorMap={itemColorMap}
-            onAddSection={addSection} onRemoveSection={removeSection} onUpdateSection={updateSection}
-            onAddItem={addItem} onRemoveItem={removeItem} onUpdateItem={updateItem} onUpdateItemMonth={updateItemMonth}
+            itemColorMap={itemColorMap} planYear={planYear} onPlanYearChange={setPlanYear}
+            onAddSection={addSection} onRemoveSection={removeSection} onUpdateSection={updateSection} onReorderSections={reorderSections}
+            onAddItem={addItem} onRemoveItem={removeItem} onUpdateItem={updateItem} onUpdateItemMonth={updateItemMonth} onReorderItems={reorderItems}
             onAddSubItem={addSubItem} onRemoveSubItem={removeSubItem}
             onUpdateSubItem={updateSubItem} onUpdateSubItemMonth={updateSubItemMonth}
-            onUpdateItemActualMonth={updateItemActualMonth}
-            onUpdateSubItemActualMonth={updateSubItemActualMonth}
           />
         )}
         {tab === 'capex' && (
@@ -2756,6 +2916,9 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
             capex={capex}
             onAddCapexItem={addCapexItem} onRemoveCapexItem={removeCapexItem} onUpdateCapexItem={updateCapexItem}
             onAddCapexSubItem={addCapexSubItem} onRemoveCapexSubItem={removeCapexSubItem} onUpdateCapexSubItem={updateCapexSubItem}
+            onOptimize={optimizeCapexContribs}
+            reserveBal={reserveBal} darkMode={darkMode}
+            lifeExpectancy={lifeExpectancy} currentAge={currentAge}
           />
         )}
         {tab === 'goals' && (
