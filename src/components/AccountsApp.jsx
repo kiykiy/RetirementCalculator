@@ -354,7 +354,6 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
 // ─── Other Asset Card ─────────────────────────────────────────────────────────
 
 const OTHER_ASSET_TYPES = [
-  { value: 'real_estate', label: 'Real Estate'  },
   { value: 'vehicle',     label: 'Vehicle'       },
   { value: 'artwork',     label: 'Artwork'        },
   { value: 'collectible', label: 'Collectible'   },
@@ -363,7 +362,7 @@ const OTHER_ASSET_TYPES = [
 ]
 
 const ASSET_TYPE_ICONS = {
-  real_estate: '🏠', vehicle: '🚗', artwork: '🎨',
+  vehicle: '🚗', artwork: '🎨',
   collectible: '💎', business: '🏢', other: '📦',
 }
 
@@ -491,7 +490,7 @@ function CardWrap({ id, highlightId, children }) {
   )
 }
 
-export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetChange, darkMode, focusAccountId, demoMode = false }) {
+export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetChange, darkMode, focusAccountId, demoMode = false, onGoToRealEstate }) {
   const sp           = inputs.spouse ?? {}
   const spouseEnabled = !!sp.enabled
   const primaryName  = inputs.userName  || 'Primary'
@@ -809,13 +808,13 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
           </button>
         } />
         <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-          Real estate, vehicles, artwork, and other assets that contribute to your net worth.
+          Vehicles, artwork, business interests, and other assets. Manage real estate &amp; mortgages in the 🏠 Real Estate tab.
         </p>
         {otherAssets.length === 0 ? (
           <button onClick={addOtherAsset}
             className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center gap-1 p-6 text-gray-400 hover:text-brand-600 hover:border-brand-300 dark:hover:text-brand-400 transition-colors w-full">
-            <span className="text-xl leading-none">🏠</span>
-            <span className="text-xs font-medium">Add real estate, vehicle, or other asset</span>
+            <span className="text-xl leading-none">📦</span>
+            <span className="text-xs font-medium">Add vehicle, artwork, or other asset</span>
           </button>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -835,6 +834,54 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
           </div>
         )}
       </section>
+
+      {/* ── Real Estate (linked from RE tab) ── */}
+      {(budget.properties ?? []).length > 0 && (() => {
+        const props = budget.properties ?? []
+        const totalPropVal  = props.reduce((s, p) => s + (p.currentValue ?? 0), 0)
+        const totalMortDebt = props.reduce((s, p) => s + (p.mortgage?.enabled ? (p.mortgage?.balance ?? 0) : 0), 0)
+        return (
+          <section>
+            <div className="border-t border-gray-100 dark:border-gray-800 mb-8" />
+            <SectionHeader title="Real Estate" total={totalPropVal - totalMortDebt}
+              action={
+                <button onClick={() => onGoToRealEstate?.()}
+                  className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
+                  Manage in 🏠 tab →
+                </button>
+              }
+            />
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
+              Properties and mortgages are managed in the Real Estate tab. Equity shown below contributes to your net worth.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {props.map(p => {
+                const equity = (p.currentValue ?? 0) - (p.mortgage?.enabled ? (p.mortgage?.balance ?? 0) : 0)
+                return (
+                  <div key={p.id} className="border border-gray-100 dark:border-gray-800 rounded-xl p-3 space-y-1.5 bg-white dark:bg-gray-800/50">
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{p.name}</p>
+                    <p className="text-[10px] text-gray-400 capitalize">{p.type?.replace('_', ' ')}</p>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-gray-500">Value</span>
+                      <span className="font-semibold text-gray-900 dark:text-gray-100">${(p.currentValue ?? 0).toLocaleString()}</span>
+                    </div>
+                    {p.mortgage?.enabled && (p.mortgage?.balance ?? 0) > 0 && (
+                      <div className="flex justify-between text-[11px]">
+                        <span className="text-gray-500">Mortgage</span>
+                        <span className="font-semibold text-rose-500">−${(p.mortgage.balance).toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-[11px] pt-1 border-t border-gray-100 dark:border-gray-700">
+                      <span className="text-gray-500 font-medium">Equity</span>
+                      <span className={`font-bold ${equity >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>${equity.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
 
     </div>
     </div>

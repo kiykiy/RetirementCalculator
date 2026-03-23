@@ -23,6 +23,7 @@ import SequencingAdvisor  from './components/SequencingAdvisor.jsx'
 import EstateTab          from './components/EstateTab.jsx'
 import IncomeTargetPanel  from './components/IncomeTargetPanel.jsx'
 import AccountsApp        from './components/AccountsApp.jsx'
+import RealEstateApp     from './components/RealEstateApp.jsx'
 import ExpenseTracker     from './components/ExpenseTracker.jsx'
 import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
@@ -211,6 +212,7 @@ const DEFAULT_BUDGET = {
     { id: 'da1', name: 'Credit Card', balance: 0, rate: 19.99, debtType: 'credit_card', minPayment: 0 },
   ],
   goals: [],
+  properties: [],
 }
 
 const LS_KEY = 'endgame_simulator_v1'
@@ -480,7 +482,7 @@ export default function App() {
     const cashAccounts       = b.cashAccounts       ?? DEFAULT_BUDGET.cashAccounts
     const investmentAccounts = b.investmentAccounts ?? DEFAULT_BUDGET.investmentAccounts
     const goals              = b.goals              ?? DEFAULT_BUDGET.goals
-    return { ...DEFAULT_BUDGET, ...b, incomes, expenseSections, capex, cashAccounts, investmentAccounts, goals }
+    return { ...DEFAULT_BUDGET, ...b, incomes, expenseSections, capex, cashAccounts, investmentAccounts, goals, properties: b.properties ?? [] }
   })
   const strategyLeaveTimer = useRef(null)
   const rrspLeaveTimer     = useRef(null)
@@ -905,6 +907,19 @@ export default function App() {
           A
         </button>
 
+        {/* P — Real Estate app */}
+        <button
+          onClick={() => setActiveApp('realestate')}
+          title="Real Estate"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center text-base transition-all duration-150 shadow-sm
+            ${activeApp === 'realestate'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          🏠
+        </button>
+
       </div>
 
       {/* ── App container (rounded border) ── */}
@@ -931,6 +946,11 @@ export default function App() {
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Accounts</h1>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Retirement, Cash & Investments</p>
+                  </>
+                ) : activeApp === 'realestate' ? (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Real Estate</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Properties & Mortgages</p>
                   </>
                 ) : (
                   <>
@@ -1164,7 +1184,15 @@ export default function App() {
             inputs={inputs} onInputsChange={handleInputChange}
             budget={budget} onBudgetChange={setBudget}
             darkMode={darkMode}
-            focusAccountId={focusAccountId} demoMode={demoMode} />
+            focusAccountId={focusAccountId} demoMode={demoMode}
+            onGoToRealEstate={() => setActiveApp('realestate')} />
+
+        ) : activeApp === 'realestate' ? (
+
+          /* Real Estate app */
+          <RealEstateApp
+            budget={budget} onChange={setBudget}
+            darkMode={darkMode} demoMode={demoMode} />
 
         ) : (
 

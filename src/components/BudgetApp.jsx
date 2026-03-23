@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import { calcTax, PROVINCES } from '../lib/tax.js'
 import { calcTfsaLimit } from '../lib/simulate.js'
+import { calcRealEstateSummary } from './RealEstateApp.jsx'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -2049,6 +2050,7 @@ function DashboardTab({
   dashDemo = false,
   onToggleDashDemo,
   otherAssets = [],
+  properties = [],
 }) {
   const now = new Date()
   const [selPeriod, setSelPeriod] = useState({ type: 'quarter', q: 1 })
@@ -2102,6 +2104,13 @@ function DashboardTab({
   const displayOtherAssets = dashDemo && otherAssets.length === 0 ? DEMO_OTHER_ASSETS : otherAssets
   const totalOtherAssets   = displayOtherAssets.reduce((s, a) => s + (a.value ?? 0), 0)
 
+  // Real estate (from RealEstateApp)
+  const reSummary            = calcRealEstateSummary(properties)
+  const totalPropertyValue   = reSummary.totalPropertyValue
+  const totalMortgageDebt    = reSummary.totalMortgageDebt
+  const reEquity             = reSummary.totalRealEstateEquity
+  const reRentalIncome       = reSummary.monthlyRentalIncome
+
   const reserveBal = displayCash.reduce((s, a) => {
     if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name === 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
     return s
@@ -2113,7 +2122,7 @@ function DashboardTab({
   const totalCash        = displayCash.reduce((s, a) => s + accBal(a), 0)
   const totalInvestments = displayInvestments.reduce((s, a) => s + accBal(a), 0)
   const totalDebt        = displayDebt.reduce((s, a) => s + (a.balance ?? 0), 0)
-  const totalNW          = totalCash + totalInvestments + totalOtherAssets - totalDebt
+  const totalNW          = totalCash + totalInvestments + totalOtherAssets + totalPropertyValue - totalDebt - totalMortgageDebt
   const projCash         = displayCash.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 0) / 100), 0) + annualCashflow
   const projInvestments  = displayInvestments.reduce((s, a) => s + accBal(a) * (1 + (a.rate ?? 6) / 100), 0)
   const projNW           = projCash + projInvestments - totalDebt
@@ -2128,12 +2137,28 @@ function DashboardTab({
     let runCash  = totalCash
     let runInv   = totalInvestments
     let runDebts = displayDebt.map(a => ({ rate: a.rate ?? 0, balance: a.balance ?? 0, minPayment: a.minPayment ?? 0 }))
-    const rows = [{ year: 'Now', assets: totalCash + totalInvestments + totalOtherAssets, liabilities: totalDebt, netWorth: totalNW }]
+    // Real estate: properties appreciate independently; mortgages pay down
+    let runProps = properties.map(p => ({
+      value: p.currentValue ?? 0,
+      appreciation: (p.appreciation ?? 3) / 100,
+      mortBal: p.mortgage?.enabled ? (p.mortgage?.balance ?? 0) : 0,
+      mortRate: (p.mortgage?.rate ?? 0) / 100 / 12,
+      mortPayment: (() => { const m = p.mortgage; if (!m?.enabled || !m.balance) return 0; const r = (m.rate ?? 0)/100/12; const n = m.amortizationMonths ?? 0; if (!n) return 0; return r === 0 ? m.balance/n : m.balance*r/(1-Math.pow(1+r,-n)) })(),
+    }))
+    const startRePropValue = runProps.reduce((s, p) => s + p.value, 0)
+    const startReMortDebt  = runProps.reduce((s, p) => s + p.mortBal, 0)
+    const rows = [{ year: 'Now', assets: totalCash + totalInvestments + totalOtherAssets + startRePropValue, liabilities: totalDebt + startReMortDebt, netWorth: totalNW }]
     let runOther = totalOtherAssets
     for (let y = 1; y <= 10; y++) {
       runCash = runCash + annualCashflow
       runInv  = runInv * (1 + weightedInvRate)
       runOther = displayOtherAssets.reduce((s, a) => s + (a.value ?? 0) * Math.pow(1 + (a.appreciation ?? 0) / 100, y), 0)
+      runProps = runProps.map(p => {
+        const newValue = p.value * (1 + p.appreciation)
+        let bal = p.mortBal
+        for (let m = 0; m < 12; m++) bal = Math.max(0, bal * (1 + p.mortRate) - p.mortPayment)
+        return { ...p, value: newValue, mortBal: bal }
+      })
       runDebts = runDebts.map(d => {
         let bal = d.balance
         const r = d.rate / 100 / 12
@@ -2141,8 +2166,10 @@ function DashboardTab({
         for (let m = 0; m < 12; m++) bal = Math.max(0, bal * (1 + r) - mp)
         return { ...d, balance: bal }
       })
-      const assets      = Math.max(0, runCash) + runInv + runOther
-      const liabilities = runDebts.reduce((s, d) => s + d.balance, 0)
+      const rePropValue = runProps.reduce((s, p) => s + p.value, 0)
+      const reMortDebt  = runProps.reduce((s, p) => s + p.mortBal, 0)
+      const assets      = Math.max(0, runCash) + runInv + runOther + rePropValue
+      const liabilities = runDebts.reduce((s, d) => s + d.balance, 0) + reMortDebt
       rows.push({ year: String(baseYear + y), assets: Math.round(assets), liabilities: Math.round(liabilities), netWorth: Math.round(assets - liabilities) })
     }
     return rows
@@ -2377,6 +2404,12 @@ function DashboardTab({
                   </div>
                 )
               })}
+              {reRentalIncome > 0 && (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300">🏘 Rental</span>
+                  <span className="text-[11px] tabular-nums text-emerald-600 dark:text-emerald-400 font-semibold">{fmtFull(reRentalIncome)}<span className="text-[9px] text-gray-400 font-normal">/mo net</span></span>
+                </div>
+              )}
               <div className="ml-auto flex items-center gap-3 flex-shrink-0">
                 <span className="text-[10px] text-gray-400">Gross <span className="text-gray-600 dark:text-gray-300 font-semibold tabular-nums">{fmtFull(totalGross)}</span></span>
                 <span className="text-[10px] text-gray-400">Tax <span className="text-rose-500 font-semibold tabular-nums">{fmtFull(totalGross - totalNet)}</span></span>
@@ -2682,7 +2715,7 @@ function DashboardTab({
 // ─── Main BudgetApp ───────────────────────────────────────────────────────────
 
 export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard', onTabChange, lifeExpectancy = 90, currentAge = 40, retirementInputs = {}, onOpenAccounts, demoMode = false }) {
-  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [], debtAccounts = [], transactions = [], otherAssets = [] } = budget
+  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [], debtAccounts = [], transactions = [], otherAssets = [], properties = [] } = budget
 
   const [planYear, setPlanYear] = useState(new Date().getFullYear())
 
@@ -2890,6 +2923,7 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
             onOpenAccounts={onOpenAccounts}
             dashDemo={demoMode}
             otherAssets={otherAssets}
+            properties={properties}
           />
         )}
         {tab === 'income' && (
