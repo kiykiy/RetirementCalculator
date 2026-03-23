@@ -14,6 +14,7 @@
     "@supabase/supabase-js": "^2.99.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-plaid-link": "^4.1.1",
     "recharts": "^2.13.3"
   },
   "devDependencies": {
