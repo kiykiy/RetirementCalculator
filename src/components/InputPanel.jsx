@@ -378,6 +378,7 @@ const NAV_ITEMS = [
   { key: 'other',      label: 'Other Income'                     },
   { key: 'retincome',  label: 'Ret. Income'                      },
   { key: 'tax',        label: 'Tax'                              },
+  { key: 'estate',     label: 'Estate'                           },
   { divider: true,     label: 'Tools'                            },
   { key: 'cppoas',     label: 'CPP/OAS Timing', cardWidth: 520  },
 ]
@@ -867,6 +868,49 @@ export default function InputPanel({ inputs, onChange }) {
         </div>
       )
     })(),
+
+    estate: (
+      <div className="space-y-4">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={inputs.estateGoalEnabled ?? false}
+            onChange={e => set('estateGoalEnabled')(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-xs text-gray-700 dark:text-gray-300">Set an estate goal</span>
+        </label>
+        {(inputs.estateGoalEnabled) && (
+          <Field label="Estate Goal" id="estateGoal">
+            <NumberInput
+              id="estateGoal"
+              value={inputs.estateGoal ?? 0}
+              onChange={set('estateGoal')}
+              min={0}
+              step={10000}
+              prefix="$"
+            />
+          </Field>
+        )}
+        <p className="text-[11px] text-gray-400 dark:text-gray-500">
+          Target amount to leave to heirs after tax. Shown as a progress bar on the Estate tab.
+        </p>
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={inputs.spousalRollover ?? false}
+              onChange={e => set('spousalRollover')(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">Spousal Rollover</span>
+          </label>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
+            RRIF/RRSP transfers to spouse tax-free at death. Defers RRIF tax — affects estate and "Net Estate to Heirs".
+          </p>
+        </div>
+      </div>
+    ),
 
     cppoas: (() => {
       const cpWho = whoFor('cppoas')

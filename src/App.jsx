@@ -28,8 +28,11 @@ const DEFAULT_INPUTS = {
   spouseName:     '',
   currentAge:     45,
   retirementAge:  65,
-  lifeExpectancy: 90,
-  province:       'ON',
+  lifeExpectancy:    90,
+  province:          'ON',
+  estateGoalEnabled: false,
+  estateGoal:        0,
+  spousalRollover:   false,
   accounts: [
     { id: 'rrif',   name: 'RRSP / RRIF',    balance: 250000, annualContribution: 10500, returnRate: 7,   taxType: 'rrif'   },
     { id: 'tfsa',   name: 'TFSA',           balance: 80000,  annualContribution: 7000,  returnRate: 7,   taxType: 'tfsa'   },
@@ -384,6 +387,8 @@ export default function App() {
   const scenarioLeaveTimer                              = useRef(null)
   const [viewPerson,          setViewPerson]           = useState('combined') // 'primary' | 'spouse' | 'combined'
   const { snapshots, save: saveSnapshot, remove: deleteSnapshot, rename: renameSnapshot, hydrate: hydrateSnapshots } = useSnapshots()
+  const [activeSnapshotName, setActiveSnapshotName] = useState('Base Scenario')
+  const baseSnapshotSaved = useRef(false)
 
   // ── Per-person config — active person is spouse when explicitly viewing spouse ─
   const activePersonKey = viewPerson === 'spouse' ? 'spouse' : 'primary'
@@ -481,6 +486,15 @@ export default function App() {
     if (d.budget)            setBudget(d.budget)
     if (d.snapshots)         hydrateSnapshots(d.snapshots)
   }
+
+  // ── Auto-save Base Scenario on first load ────────────────────────────────────
+  useEffect(() => {
+    if (baseSnapshotSaved.current) return
+    if (snapshots.length === 0) {
+      saveSnapshot('Base Scenario', { inputs, personConfigs })
+    }
+    baseSnapshotSaved.current = true
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load from Supabase when session becomes available ────────────────────────
   useEffect(() => {
@@ -942,13 +956,15 @@ export default function App() {
               {activeApp === 'retirement' && (
                 <SnapshotsPanel
                   snapshots={snapshots}
-                  onSave={name => saveSnapshot(name, { inputs, personConfigs })}
-                  onLoad={data => {
+                  activeSnapshotName={activeSnapshotName}
+                  onSave={name => { saveSnapshot(name, { inputs, personConfigs }); setActiveSnapshotName(name || `Snapshot ${new Date().toLocaleDateString()}`) }}
+                  onLoad={(data, name) => {
                     if (data.inputs) setInputs(mergeInputs(data.inputs))
                     setPersonConfigs(loadPersonConfigs(data))
+                    setActiveSnapshotName(name)
                   }}
                   onDelete={deleteSnapshot}
-                  onRename={renameSnapshot}
+                  onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
                 />
               )}
 
@@ -1480,31 +1496,13 @@ export default function App() {
                 }}
               />
 
-              {/* OAS clawback warning */}
-              {result.rows.some(r => r.oasClawback > 0) && (
-                <div className="card !bg-red-50 !border-red-100 dark:!bg-red-950/30 dark:!border-red-900/50">
-                  <div className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 text-red-600 dark:text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium text-red-900 dark:text-red-300">OAS Clawback Warning</p>
-                      <p className="text-xs text-red-700/80 mt-1 dark:text-red-400/80">
-                        Your income in some years exceeds the clawback threshold (~$91K). Consider a lower-income strategy or TFSA-first withdrawals to reduce clawback.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
 
           {/* Estate tab */}
           {result && activeTab === 'estate' && (
-            <EstateTab summary={result.summary} result={result} inputs={inputs} />
+            <EstateTab summary={result.summary} result={result} inputs={inputs} onInputChange={handleInputChange} />
           )}
 
           {/* Retirement Cashflow table */}

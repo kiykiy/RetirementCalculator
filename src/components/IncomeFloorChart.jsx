@@ -9,15 +9,18 @@ function fmtY(v) {
 
 function CustomTooltip({ active, payload, label, real }) {
   if (!active || !payload?.length) return null
-  const floor = payload.find(p => p.dataKey === 'floor')?.value ?? 0
-  const portfolio = payload.find(p => p.dataKey === 'portfolio')?.value ?? 0
-  const total = floor + portfolio
-  const floorPct = total > 0 ? Math.round(floor / total * 100) : 0
+  const cpp      = payload.find(p => p.dataKey === 'cpp')?.value ?? 0
+  const oas      = payload.find(p => p.dataKey === 'oas')?.value ?? 0
+  const dbPension = payload.find(p => p.dataKey === 'dbPension')?.value ?? 0
+  const other    = payload.find(p => p.dataKey === 'otherPension')?.value ?? 0
+  const total    = cpp + oas + dbPension + other
   return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-xs dark:bg-slate-800 dark:border-slate-700 space-y-0.5">
       <p className="font-semibold text-slate-700 dark:text-slate-200 mb-1">Age {label}{real ? ' (real $)' : ''}</p>
-      <p className="text-emerald-600">Guaranteed income: {fmtY(floor)} ({floorPct}%)</p>
-      <p className="text-blue-500">Portfolio withdrawal: {fmtY(portfolio)} ({100 - floorPct}%)</p>
+      {cpp       > 0 && <p className="text-emerald-600">CPP: {fmtY(cpp)}</p>}
+      {oas       > 0 && <p className="text-teal-500">OAS: {fmtY(oas)}</p>}
+      {dbPension > 0 && <p className="text-blue-500">DB Pension: {fmtY(dbPension)}</p>}
+      {other     > 0 && <p className="text-indigo-500">Other Pension: {fmtY(other)}</p>}
       <p className="text-gray-500 border-t border-gray-100 dark:border-gray-700 pt-1 mt-1">Total: {fmtY(total)}</p>
     </div>
   )
@@ -36,18 +39,20 @@ export default function IncomeFloorChart({ rows, retirementAge, inflation = 2.5,
     .map(r => {
       const deflate = real ? 1 / Math.pow(1 + inf, r.age - retirementAge) : 1
       return {
-        age: r.age,
-        floor:     Math.round(((r.cpp ?? 0) + (r.oas ?? 0) + (r.dbPension ?? 0) + (r.otherPension ?? 0)) * deflate),
-        portfolio: Math.round((r.grossWithdrawal ?? 0) * deflate),
+        age:          r.age,
+        cpp:          Math.round((r.cpp          ?? 0) * deflate),
+        oas:          Math.round((r.oas          ?? 0) * deflate),
+        dbPension:    Math.round((r.dbPension    ?? 0) * deflate),
+        otherPension: Math.round((r.otherPension ?? 0) * deflate),
       }
     })
 
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Income Floor vs Portfolio</h3>
+        <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Guaranteed Income Floor</h3>
         <div className="flex items-center gap-2">
-          <p className="text-[11px] text-gray-400 dark:text-gray-500 hidden sm:block">CPP + OAS + pensions vs portfolio withdrawals</p>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 hidden sm:block">CPP + OAS + pensions</p>
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 text-xs dark:bg-gray-800">
             <button
               onClick={() => setReal(false)}
@@ -67,8 +72,10 @@ export default function IncomeFloorChart({ rows, retirementAge, inflation = 2.5,
           <YAxis tickFormatter={fmtY} tick={{ fontSize: 11 }} width={60} />
           <Tooltip content={<CustomTooltip real={real} />} />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar dataKey="floor"     name="Guaranteed (CPP+OAS+Pension)" stackId="a" fill="#10b981" radius={[0,0,0,0]} />
-          <Bar dataKey="portfolio" name="Portfolio Withdrawal"          stackId="a" fill="#3b82f6" radius={[2,2,0,0]} />
+          <Bar dataKey="cpp"          name="CPP"           stackId="a" fill="#10b981" radius={[0,0,0,0]} />
+          <Bar dataKey="oas"          name="OAS"           stackId="a" fill="#14b8a6" radius={[0,0,0,0]} />
+          <Bar dataKey="dbPension"    name="DB Pension"    stackId="a" fill="#3b82f6" radius={[0,0,0,0]} />
+          <Bar dataKey="otherPension" name="Other Pension" stackId="a" fill="#6366f1" radius={[2,2,0,0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

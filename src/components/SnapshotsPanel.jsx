@@ -48,7 +48,7 @@ export function useSnapshots() {
 }
 
 // ── UI Panel ─────────────────────────────────────────────────────────────────
-export default function SnapshotsPanel({ snapshots, onSave, onLoad, onDelete, onRename }) {
+export default function SnapshotsPanel({ snapshots, activeSnapshotName, onSave, onLoad, onDelete, onRename }) {
   const [open,    setOpen]    = useState(false)
   const [name,    setName]    = useState('')
   const [editing, setEditing] = useState(null) // id being renamed
@@ -83,7 +83,13 @@ export default function SnapshotsPanel({ snapshots, onSave, onLoad, onDelete, on
   }
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-1.5">
+      {/* Active snapshot label */}
+      {activeSnapshotName && (
+        <span className="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap hidden sm:block">
+          {activeSnapshotName}
+        </span>
+      )}
       {/* Trigger button */}
       <button
         ref={btnRef}
@@ -172,7 +178,7 @@ export default function SnapshotsPanel({ snapshots, onSave, onLoad, onDelete, on
                     <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{fmtDate(snap.savedAt)}</p>
                   </div>
                   <button
-                    onClick={() => { onLoad(snap.data); setOpen(false) }}
+                    onClick={() => { onLoad(snap.data, snap.name); setOpen(false) }}
                     className="text-[11px] font-medium text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap"
                   >
                     Load

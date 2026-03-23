@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { calcEstateTax } from '../lib/simulate.js'
 import NetWorthSnapshot from './NetWorthSnapshot.jsx'
 
@@ -69,8 +69,8 @@ function NetBar({ estate }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function EstateTab({ summary, result, inputs }) {
-  const [spousalRollover, setSpousalRollover] = useState(false)
+export default function EstateTab({ summary, result, inputs, onInputChange }) {
+  const spousalRollover = inputs.spousalRollover ?? false
 
   const estate = useMemo(() => {
     const accounts = summary?.finalAccounts
@@ -95,7 +95,7 @@ export default function EstateTab({ summary, result, inputs }) {
     <div className="space-y-4">
 
       {/* Net worth journey */}
-      {result && <NetWorthSnapshot inputs={inputs} result={result} />}
+      {result && <NetWorthSnapshot inputs={inputs} result={result} estateGoal={inputs.estateGoalEnabled ? (inputs.estateGoal ?? 0) : 0} />}
 
     <div className="card space-y-4">
 
@@ -110,14 +110,28 @@ export default function EstateTab({ summary, result, inputs }) {
         </div>
 
         {/* Spousal rollover toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none flex-shrink-0">
+        <label className="flex items-center gap-2 cursor-pointer select-none flex-shrink-0 group relative">
           <div
-            onClick={() => setSpousalRollover(v => !v)}
+            onClick={() => onInputChange({ ...inputs, spousalRollover: !spousalRollover })}
             className={`relative inline-flex h-4 w-7 flex-shrink-0 rounded-full transition-colors ${spousalRollover ? 'bg-gray-900 dark:bg-white' : 'bg-gray-200 dark:bg-gray-700'}`}
           >
             <span className={`inline-block h-3 w-3 rounded-full bg-white dark:bg-gray-900 shadow transform transition-transform mt-0.5 ${spousalRollover ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
           </div>
           <span className="text-[11px] text-gray-600 dark:text-gray-400">Spousal Rollover</span>
+          {/* Tooltip */}
+          <div className="pointer-events-none absolute bottom-full right-0 mb-2 w-64 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <div className="bg-gray-900 dark:bg-gray-700 text-white text-[11px] rounded-lg shadow-xl p-3 space-y-1.5 leading-relaxed">
+              <p className="font-semibold text-white">Spousal Rollover</p>
+              <p className="text-gray-300">RRIF/RRSP transfers to your spouse tax-free at death — no immediate tax hit on the estate.</p>
+              {deferredRrifTax > 0 && (
+                <div className="bg-emerald-900/40 border border-emerald-700/50 rounded-md px-2 py-1.5 space-y-0.5">
+                  <p className="text-emerald-300 font-semibold">Impact: +${Math.round(deferredRrifTax).toLocaleString()} to estate</p>
+                  <p className="text-emerald-400/80">RRIF tax deferred to spouse — shifts this liability out of your estate.</p>
+                </div>
+              )}
+              <p className="text-amber-400 font-medium">⚠ Tax deferred, not eliminated — spouse pays it on withdrawal or death.</p>
+            </div>
+          </div>
         </label>
       </div>
 
