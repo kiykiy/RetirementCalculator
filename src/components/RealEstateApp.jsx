@@ -124,9 +124,155 @@ function MetricCard({ label, value, sub, color = 'blue', negate = false }) {
   )
 }
 
+// ─── Amortization Schedule Builder ───────────────────────────────────────────
+function buildAmortSchedule(mortgage, propertyValue = 0, appreciation = 0) {
+  const bal0  = mortgage?.balance ?? 0
+  const rate  = mortgage?.rate ?? 0
+  const n     = mortgage?.amortizationMonths ?? 0
+  if (!bal0 || !n || !mortgage?.enabled) return []
+
+  const r       = rate / 100 / 12
+  const payment = calcMortgagePayment(mortgage)
+  const baseYear = new Date().getFullYear()
+  const rows = []
+  let bal = bal0
+
+  for (let yr = 1; bal > 0.5 && yr <= Math.ceil(n / 12); yr++) {
+    const openBal = bal
+    let annInt = 0, annPrin = 0
+    for (let m = 0; m < 12 && bal > 0.01; m++) {
+      const interest  = r === 0 ? 0 : bal * r
+      const principal = Math.min(payment - interest, bal)
+      annInt  += interest
+      annPrin += principal
+      bal      = Math.max(0, bal - principal)
+    }
+    const projVal = propertyValue * Math.pow(1 + appreciation / 100, yr)
+    rows.push({
+      yr, calYear: baseYear + yr,
+      openBal: Math.round(openBal), closeBal: Math.round(bal),
+      interest: Math.round(annInt), principal: Math.round(annPrin),
+      projVal: Math.round(projVal), equity: Math.round(projVal - bal),
+    })
+  }
+  return rows
+}
+
+// ─── Amortization Table ───────────────────────────────────────────────────────
+function AmortizationTable({ mortgage, propertyValue = 0, appreciation = 0 }) {
+  const [expanded, setExpanded] = useState(false)
+  const rows = buildAmortSchedule(mortgage, propertyValue, appreciation)
+  if (!rows.length) return null
+
+  const totalInterest  = rows.reduce((s, r) => s + r.interest, 0)
+  const totalPrincipal = rows.reduce((s, r) => s + r.principal, 0)
+  const totalPayments  = totalInterest + totalPrincipal
+  const payoffYear     = rows.at(-1)?.calYear
+  const fmtK = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : `$${Math.round(v/1000)}k`
+  const fmt  = v => '$' + Math.round(v).toLocaleString('en-CA')
+
+  // Max interest for bar scaling
+  const maxInt = Math.max(...rows.map(r => r.interest))
+
+  const displayRows = expanded ? rows : rows.slice(0, 5)
+
+  return (
+    <div className="mt-3 space-y-3">
+      {/* Summary chips */}
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg px-2 py-2">
+          <p className="text-[9px] text-rose-500 dark:text-rose-400 uppercase tracking-wider font-semibold">Total Interest</p>
+          <p className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums">{fmtK(totalInterest)}</p>
+        </div>
+        <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-2 py-2">
+          <p className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-semibold">Total Paid</p>
+          <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtK(totalPayments)}</p>
+        </div>
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-2 py-2">
+          <p className="text-[9px] text-blue-500 dark:text-blue-400 uppercase tracking-wider font-semibold">Payoff Year</p>
+          <p className="text-xs font-bold text-blue-600 dark:text-blue-300">{payoffYear}</p>
+        </div>
+      </div>
+
+      {/* Interest cost ratio */}
+      <div>
+        <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400 mb-1">
+          <span>Interest cost</span>
+          <span>{Math.round(totalInterest / totalPayments * 100)}% of total payments</span>
+        </div>
+        <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden flex">
+          <div className="h-full bg-emerald-500" style={{ width: `${totalPrincipal / totalPayments * 100}%` }} />
+          <div className="h-full bg-rose-400" style={{ width: `${totalInterest / totalPayments * 100}%` }} />
+        </div>
+        <div className="flex justify-between text-[9px] mt-0.5">
+          <span className="text-emerald-600 dark:text-emerald-400">■ Principal {fmtK(totalPrincipal)}</span>
+          <span className="text-rose-500 dark:text-rose-400">■ Interest {fmtK(totalInterest)}</span>
+        </div>
+      </div>
+
+      {/* Year-by-year table */}
+      <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-700">
+              <th className="px-2 py-2 text-left font-semibold text-gray-500 dark:text-gray-400">Year</th>
+              <th className="px-2 py-2 text-right font-semibold text-gray-500 dark:text-gray-400">Balance</th>
+              <th className="px-2 py-2 text-right font-semibold text-rose-500 dark:text-rose-400">Interest</th>
+              <th className="px-2 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">Principal</th>
+              {propertyValue > 0 && <th className="px-2 py-2 text-right font-semibold text-blue-500 dark:text-blue-400">Equity</th>}
+              <th className="px-2 py-2 text-left font-semibold text-gray-400">I vs P</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+            {displayRows.map(row => {
+              const intBarW = maxInt > 0 ? row.interest / maxInt * 100 : 0
+              const prinBarW = maxInt > 0 ? row.principal / maxInt * 100 : 0
+              const totalBarW = Math.max(intBarW, prinBarW)
+              return (
+                <tr key={row.yr} className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
+                  <td className="px-2 py-1.5 font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                    {row.calYear}
+                    {row.closeBal === 0 && <span className="ml-1 text-emerald-500">✓</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{fmt(row.closeBal)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-rose-500 dark:text-rose-400">{fmt(row.interest)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmt(row.principal)}</td>
+                  {propertyValue > 0 && (
+                    <td className="px-2 py-1.5 text-right tabular-nums text-blue-600 dark:text-blue-400 font-medium">{fmt(row.equity)}</td>
+                  )}
+                  <td className="px-2 py-1.5 min-w-[60px]">
+                    <div className="space-y-0.5">
+                      <div className="h-1 bg-rose-200 dark:bg-rose-900/50 rounded-full overflow-hidden">
+                        <div className="h-full bg-rose-400" style={{ width: `${intBarW}%` }} />
+                      </div>
+                      <div className="h-1 bg-emerald-100 dark:bg-emerald-900/50 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500" style={{ width: `${prinBarW}%` }} />
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {rows.length > 5 && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="w-full text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline py-1"
+        >
+          {expanded ? `Show less ▲` : `Show all ${rows.length} years ▼`}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ─── Mortgage Section ─────────────────────────────────────────────────────────
-function MortgageSection({ mortgage, onUpdate, readOnly }) {
+function MortgageSection({ mortgage, onUpdate, readOnly, propertyValue = 0, appreciation = 0 }) {
   const mort = mortgage ?? { enabled: false }
+  const [showSchedule, setShowSchedule] = useState(false)
   const payment = calcMortgagePayment(mort)
   const paidPct = mort.originalAmount > 0 && mort.balance <= mort.originalAmount
     ? Math.round((1 - mort.balance / mort.originalAmount) * 100) : 0
@@ -217,6 +363,26 @@ function MortgageSection({ mortgage, onUpdate, readOnly }) {
               <span className="text-[11px] text-rose-700 dark:text-rose-300">Monthly P&amp;I</span>
               <span className="text-sm font-bold tabular-nums text-rose-600 dark:text-rose-400">${Math.round(payment).toLocaleString()}/mo</span>
             </div>
+          )}
+
+          {/* Amortization Schedule toggle */}
+          {mort.balance > 0 && mort.amortizationMonths > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSchedule(v => !v)}
+              className="w-full flex items-center justify-between text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300 transition-colors py-1"
+            >
+              <span>📅 Amortization Schedule</span>
+              <span className="text-gray-400">{showSchedule ? '▲ Hide' : '▼ Show'}</span>
+            </button>
+          )}
+
+          {showSchedule && (
+            <AmortizationTable
+              mortgage={mort}
+              propertyValue={propertyValue}
+              appreciation={appreciation}
+            />
           )}
         </>
       )}
@@ -396,7 +562,13 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
         </div>
 
         {/* Mortgage */}
-        <MortgageSection mortgage={property.mortgage ?? { enabled: false }} onUpdate={updMort} readOnly={readOnly} />
+        <MortgageSection
+          mortgage={property.mortgage ?? { enabled: false }}
+          onUpdate={updMort}
+          readOnly={readOnly}
+          propertyValue={property.currentValue ?? 0}
+          appreciation={property.appreciation ?? 0}
+        />
 
       </div>
     </div>
