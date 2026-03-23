@@ -24,6 +24,7 @@ import EstateTab          from './components/EstateTab.jsx'
 import IncomeTargetPanel  from './components/IncomeTargetPanel.jsx'
 import AccountsApp        from './components/AccountsApp.jsx'
 import RealEstateApp     from './components/RealEstateApp.jsx'
+import HelpApp           from './components/HelpApp.jsx'
 import ExpenseTracker     from './components/ExpenseTracker.jsx'
 import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
@@ -213,6 +214,7 @@ const DEFAULT_BUDGET = {
   ],
   goals: [],
   properties: [],
+  auditLog: [],
 }
 
 const LS_KEY = 'endgame_simulator_v1'
@@ -483,7 +485,7 @@ export default function App() {
     const cashAccounts       = b.cashAccounts       ?? DEFAULT_BUDGET.cashAccounts
     const investmentAccounts = b.investmentAccounts ?? DEFAULT_BUDGET.investmentAccounts
     const goals              = b.goals              ?? DEFAULT_BUDGET.goals
-    return { ...DEFAULT_BUDGET, ...b, incomes, expenseSections, capex, cashAccounts, investmentAccounts, goals, properties: b.properties ?? [] }
+    return { ...DEFAULT_BUDGET, ...b, incomes, expenseSections, capex, cashAccounts, investmentAccounts, goals, properties: b.properties ?? [], auditLog: b.auditLog ?? [] }
   })
   const strategyLeaveTimer = useRef(null)
   const rrspLeaveTimer     = useRef(null)
@@ -588,6 +590,129 @@ export default function App() {
     setAccCashOutflows({})
     setAccOutflowTaxRates({})
     setBudget(DEFAULT_BUDGET)
+  }
+
+  // ── Audit log diff ──────────────────────────────────────────────────────────
+  function diffBudget(prev, next) {
+    const entries = []
+    const ts = new Date().toISOString()
+    let seq = Date.now()
+    const push = (app, subTab, label, oldVal, newVal) => {
+      const fmtV = v => typeof v === 'number' ? (v >= 1000 ? '$' + v.toLocaleString('en-CA') : String(v)) : String(v ?? '')
+      entries.push({ id: String(seq++), ts, app, subTab, label, oldVal, newVal, summary: `${label}: ${fmtV(oldVal)} → ${fmtV(newVal)}` })
+    }
+    const byId = arr => Object.fromEntries((arr ?? []).map(x => [x.id, x]))
+
+    // Incomes
+    const pInc = byId(prev.incomes), nInc = byId(next.incomes)
+    for (const id of new Set([...Object.keys(pInc), ...Object.keys(nInc)])) {
+      const p = pInc[id], n = nInc[id]
+      if (!p && n) push('budget', 'income', `Income added: ${n.name}`, null, n.grossMonthly)
+      else if (p && !n) push('budget', 'income', `Income removed: ${p.name}`, p.grossMonthly, null)
+      else if (p && n && Math.round(p.grossMonthly) !== Math.round(n.grossMonthly))
+        push('budget', 'income', `Income: ${n.name}`, p.grossMonthly, n.grossMonthly)
+    }
+
+    // Expense items
+    const pSecs = byId(prev.expenseSections), nSecs = byId(next.expenseSections)
+    for (const sid of new Set([...Object.keys(pSecs), ...Object.keys(nSecs)])) {
+      const pS = pSecs[sid], nS = nSecs[sid]
+      if (!pS || !nS) continue
+      const pItems = byId(pS.items), nItems = byId(nS.items)
+      for (const iid of new Set([...Object.keys(pItems), ...Object.keys(nItems)])) {
+        const pI = pItems[iid], nI = nItems[iid]
+        if (!pI && nI) push('budget', 'plan', `Expense added: ${nS.name} › ${nI.name}`, 0, nI.months?.reduce((s,v)=>s+v,0)/12)
+        else if (pI && !nI) push('budget', 'plan', `Expense removed: ${pS.name} › ${pI.name}`, pI.months?.reduce((s,v)=>s+v,0)/12, 0)
+        else if (pI && nI) {
+          const pAvg = Math.round((pI.months ?? []).reduce((s,v)=>s+v,0)/12)
+          const nAvg = Math.round((nI.months ?? []).reduce((s,v)=>s+v,0)/12)
+          if (pAvg !== nAvg) push('budget', 'plan', `Expense: ${nS.name} › ${nI.name}`, pAvg, nAvg)
+        }
+      }
+    }
+
+    // Cash accounts
+    const pCA = byId(prev.cashAccounts), nCA = byId(next.cashAccounts)
+    for (const id of new Set([...Object.keys(pCA), ...Object.keys(nCA)])) {
+      const p = pCA[id], n = nCA[id]
+      if (!p && n) push('accounts', null, `Cash account added: ${n.name}`, 0, n.balance ?? 0)
+      else if (p && !n) push('accounts', null, `Cash account removed: ${p.name}`, p.balance ?? 0, 0)
+      else if (p && n && Math.round(p.balance ?? 0) !== Math.round(n.balance ?? 0))
+        push('accounts', null, `Cash Account: ${n.name}`, p.balance ?? 0, n.balance ?? 0)
+    }
+
+    // Investment accounts
+    const pIA = byId(prev.investmentAccounts), nIA = byId(next.investmentAccounts)
+    for (const id of new Set([...Object.keys(pIA), ...Object.keys(nIA)])) {
+      const p = pIA[id], n = nIA[id]
+      if (!p && n) push('accounts', null, `Investment added: ${n.name}`, 0, n.balance ?? 0)
+      else if (p && !n) push('accounts', null, `Investment removed: ${p.name}`, p.balance ?? 0, 0)
+      else if (p && n && Math.round(p.balance ?? 0) !== Math.round(n.balance ?? 0))
+        push('accounts', null, `Investment: ${n.name}`, p.balance ?? 0, n.balance ?? 0)
+    }
+
+    // Debt accounts
+    const pDA = byId(prev.debtAccounts), nDA = byId(next.debtAccounts)
+    for (const id of new Set([...Object.keys(pDA), ...Object.keys(nDA)])) {
+      const p = pDA[id], n = nDA[id]
+      if (!p && n) push('accounts', null, `Debt added: ${n.name}`, 0, n.balance ?? 0)
+      else if (p && !n) push('accounts', null, `Debt removed: ${p.name}`, p.balance ?? 0, 0)
+      else if (p && n && Math.round(p.balance ?? 0) !== Math.round(n.balance ?? 0))
+        push('accounts', null, `Debt: ${n.name}`, p.balance ?? 0, n.balance ?? 0)
+    }
+
+    // Properties
+    const pPR = byId(prev.properties), nPR = byId(next.properties)
+    for (const id of new Set([...Object.keys(pPR), ...Object.keys(nPR)])) {
+      const p = pPR[id], n = nPR[id]
+      if (!p && n) push('realestate', null, `Property added: ${n.name}`, 0, n.currentValue ?? 0)
+      else if (p && !n) push('realestate', null, `Property removed: ${p.name}`, p.currentValue ?? 0, 0)
+      else if (p && n) {
+        if (Math.round(p.currentValue ?? 0) !== Math.round(n.currentValue ?? 0))
+          push('realestate', null, `Property value: ${n.name}`, p.currentValue ?? 0, n.currentValue ?? 0)
+        const pMB = p.mortgage?.balance ?? 0, nMB = n.mortgage?.balance ?? 0
+        if (Math.round(pMB) !== Math.round(nMB))
+          push('realestate', null, `Mortgage balance: ${n.name}`, pMB, nMB)
+      }
+    }
+
+    // CapEx
+    const pCX = (prev.capex ?? []).flatMap(g => g.items ?? [])
+    const nCX = (next.capex ?? []).flatMap(g => g.items ?? [])
+    const pCXM = Object.fromEntries(pCX.map(x => [x.id, x])), nCXM = Object.fromEntries(nCX.map(x => [x.id, x]))
+    for (const id of new Set([...Object.keys(pCXM), ...Object.keys(nCXM)])) {
+      const p = pCXM[id], n = nCXM[id]
+      if (!p && n) push('budget', 'capex', `CapEx added: ${n.name}`, 0, n.cost ?? 0)
+      else if (p && !n) push('budget', 'capex', `CapEx removed: ${p.name}`, p.cost ?? 0, 0)
+      else if (p && n && Math.round(p.cost ?? 0) !== Math.round(n.cost ?? 0))
+        push('budget', 'capex', `CapEx: ${n.name}`, p.cost ?? 0, n.cost ?? 0)
+    }
+
+    // Goals
+    const pGL = byId(prev.goals), nGL = byId(next.goals)
+    for (const id of new Set([...Object.keys(pGL), ...Object.keys(nGL)])) {
+      const p = pGL[id], n = nGL[id]
+      if (!p && n) push('budget', 'goals', `Goal added: ${n.name}`, 0, n.amount ?? 0)
+      else if (p && !n) push('budget', 'goals', `Goal removed: ${p.name}`, p.amount ?? 0, 0)
+      else if (p && n && Math.round(p.amount ?? 0) !== Math.round(n.amount ?? 0))
+        push('budget', 'goals', `Goal: ${n.name}`, p.amount ?? 0, n.amount ?? 0)
+    }
+
+    return entries
+  }
+
+  function handleBudgetChange(newBudget) {
+    setBudget(prev => {
+      const entries = diffBudget(prev, newBudget)
+      const prevLog = prev.auditLog ?? []
+      const nextLog = entries.length > 0 ? [...entries, ...prevLog].slice(0, 500) : prevLog
+      return { ...newBudget, auditLog: nextLog }
+    })
+  }
+
+  function handleNavigateFromAudit(app, subTab) {
+    setActiveApp(app)
+    if (app === 'budget' && subTab) setBudgetTab(subTab)
   }
 
   const allResults = useMemo(() => {
@@ -921,6 +1046,23 @@ export default function App() {
           🏠
         </button>
 
+        {/* Divider before help */}
+        <div className="flex-1" />
+        <div className="w-5 h-px bg-gray-200 dark:bg-gray-700" />
+
+        {/* ? — Help & Audit Log */}
+        <button
+          onClick={() => setActiveApp('help')}
+          title="Help & Audit Log"
+          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+            ${activeApp === 'help'
+              ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
+              : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+        >
+          ?
+        </button>
+
       </div>
 
       {/* ── App container (rounded border) ── */}
@@ -952,6 +1094,11 @@ export default function App() {
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Real Estate</h1>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Properties & Mortgages</p>
+                  </>
+                ) : activeApp === 'help' ? (
+                  <>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Help & Audit Log</h1>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Documentation & Change History</p>
                   </>
                 ) : (
                   <>
@@ -1181,14 +1328,14 @@ export default function App() {
         {activeApp === 'budget' ? (
 
           /* Budget app */
-          <BudgetApp budget={budget} onChange={setBudget} darkMode={darkMode} tab={budgetTab} onTabChange={setBudgetTab}
+          <BudgetApp budget={budget} onChange={handleBudgetChange} darkMode={darkMode} tab={budgetTab} onTabChange={setBudgetTab}
             lifeExpectancy={inputs.lifeExpectancy} currentAge={inputs.currentAge} retirementInputs={inputs}
             onOpenAccounts={() => setActiveApp('accounts')} demoMode={demoMode} />
 
         ) : activeApp === 'tracking' ? (
 
           /* Expense Tracker — standalone, no Budget App chrome */
-          <ExpenseTracker budget={budget} onBudgetChange={setBudget}
+          <ExpenseTracker budget={budget} onBudgetChange={handleBudgetChange}
             onGoToAccounts={id => { setFocusAccountId(id); setActiveApp('accounts') }}
             demoMode={demoMode} />
 
@@ -1197,7 +1344,7 @@ export default function App() {
           /* Accounts app */
           <AccountsApp
             inputs={inputs} onInputsChange={handleInputChange}
-            budget={budget} onBudgetChange={setBudget}
+            budget={budget} onBudgetChange={handleBudgetChange}
             darkMode={darkMode}
             focusAccountId={focusAccountId} demoMode={demoMode}
             onGoToRealEstate={() => setActiveApp('realestate')} />
@@ -1206,8 +1353,15 @@ export default function App() {
 
           /* Real Estate app */
           <RealEstateApp
-            budget={budget} onChange={setBudget}
+            budget={budget} onChange={handleBudgetChange}
             darkMode={darkMode} demoMode={demoMode} />
+
+        ) : activeApp === 'help' ? (
+
+          /* Help & Audit Log */
+          <HelpApp
+            auditLog={budget.auditLog ?? []}
+            onNavigate={handleNavigateFromAudit} />
 
         ) : (
 
