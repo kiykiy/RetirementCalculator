@@ -270,7 +270,7 @@ export default function ResultsSummary({ summary, rows = [], probabilityOfSucces
         tooltip={tooltipTax}
       />
       <MetricCard
-        label="Avg Effective Rate"
+        label="Avg Tax Rate"
         value={pct(summary.avgEffectiveRate)}
         tooltip={tooltipRate}
       />

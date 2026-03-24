@@ -69,11 +69,12 @@
 
 @layer components {
   .input-field {
-    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs
+    @apply w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm
            transition-all duration-150
            focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20
            dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100
            dark:focus:border-brand-400 dark:focus:ring-brand-400/20;
+    min-height: 36px;
   }
   .label {
     @apply block text-xs font-medium text-gray-500 mb-1 dark:text-gray-400;
@@ -139,5 +140,70 @@
   }
   .dark .sidebar-scroll::-webkit-scrollbar-thumb {
     background: #374151;
+  }
+
+  /* Value commit flash animation */
+  @keyframes value-commit {
+    0%   { background-color: rgb(220 252 231 / 0.6); }
+    100% { background-color: transparent; }
+  }
+  @keyframes value-commit-dark {
+    0%   { background-color: rgb(20 83 45 / 0.35); }
+    100% { background-color: transparent; }
+  }
+  .input-committed { animation: value-commit 0.6s ease-out; }
+  .dark .input-committed { animation: value-commit-dark 0.6s ease-out; }
+
+  /* ── Custom range slider ── */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #111827;
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  input[type="range"]::-webkit-slider-thumb:active {
+    transform: scale(1.25);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #111827;
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-track {
+    height: 6px;
+    background: #e5e7eb;
+    border-radius: 3px;
+  }
+  .dark input[type="range"] {
+    background: #374151;
+  }
+  .dark input[type="range"]::-webkit-slider-thumb {
+    background: #f9fafb;
+    border-color: #374151;
+  }
+  .dark input[type="range"]::-moz-range-thumb {
+    background: #f9fafb;
+    border-color: #374151;
   }
 }

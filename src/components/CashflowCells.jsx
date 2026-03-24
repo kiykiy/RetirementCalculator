@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { formatWhileEditing, parseFormatted, handleArrowKeys } from '../lib/inputHelpers.js'
 
 export function fmtCell(n) {
   if (n == null || n === 0) return '—'
@@ -38,13 +39,16 @@ export function InflowCell({
         <span className="absolute left-1.5 text-gray-400 text-xs select-none">$</span>
         <input
           autoFocus
-          type="number"
-          min={0}
-          step={1000}
+          type="text"
+          inputMode="numeric"
           value={local}
-          onChange={e => setLocal(e.target.value)}
+          onChange={e => { const f = formatWhileEditing(e.target.value); setLocal(f) }}
           onBlur={commit}
-          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commit()
+            else if (e.key === 'Escape') setEditing(false)
+            else handleArrowKeys(e, { value: parseFormatted(local) || 0, step: 1000, min: 0, onChange: v => setLocal(v.toLocaleString()) })
+          }}
           className="w-24 pl-4 pr-1 py-0.5 text-xs border border-green-400 rounded focus:outline-none focus:ring-1 focus:ring-green-500"
         />
       </div>
@@ -158,13 +162,16 @@ export function OutflowCell({ age, value, taxRate = 0, onChange, onTaxRateChange
         <span className="absolute left-1.5 text-gray-400 text-xs select-none">$</span>
         <input
           autoFocus
-          type="number"
-          min={0}
-          step={1000}
+          type="text"
+          inputMode="numeric"
           value={local}
-          onChange={e => setLocal(e.target.value)}
+          onChange={e => { const f = formatWhileEditing(e.target.value); setLocal(f) }}
           onBlur={commit}
-          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commit()
+            else if (e.key === 'Escape') setEditing(false)
+            else handleArrowKeys(e, { value: parseFormatted(local) || 0, step: 1000, min: 0, onChange: v => setLocal(v.toLocaleString()) })
+          }}
           className="w-24 pl-4 pr-1 py-0.5 text-xs border border-red-400 rounded focus:outline-none focus:ring-1 focus:ring-red-400"
         />
       </div>

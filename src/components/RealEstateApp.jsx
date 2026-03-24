@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { formatWhileEditing, parseFormatted, handleArrowKeys, flashCommit } from '../lib/inputHelpers.js'
 
 // ─── Exported Calculation Utilities ──────────────────────────────────────────
 // (imported by BudgetApp DashboardTab and AccountsApp for net worth totals)
@@ -176,16 +177,19 @@ function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, class
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => () => clearTimeout(timerRef.current), [])
   const fmt = v => (typeof v === 'number' && !isNaN(v)) ? v.toLocaleString('en-CA') : '0'
   return (
     <div className="relative flex items-center">
       {prefix && <span className="absolute left-2.5 text-gray-400 text-xs select-none">{prefix}</span>}
-      <input type="text" inputMode="numeric"
+      <input ref={inputRef} type="text" inputMode="numeric"
         value={focused ? local : fmt(value)}
-        onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
-        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g, '')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }}
-        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g, '')); if (!isNaN(n)) onChange(Math.max(min, n)) }}
+        onFocus={() => { setFocused(true); prevValue.current = value; setLocal(fmt(value ?? 0)) }}
+        onChange={e => { const f = formatWhileEditing(e.target.value); setLocal(f); const n = parseFormatted(f); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFormatted(local); if (!isNaN(n)) { onChange(Math.max(min, n)); if (Math.max(min, n) !== prevValue.current) flashCommit(inputRef.current) } }}
+        onKeyDown={e => handleArrowKeys(e, { value: parseFormatted(local) || value, step, min, onChange: v => { onChange(v); setLocal(fmt(v)) } })}
         className={`input-field text-xs py-1.5 ${prefix ? 'pl-6' : ''} ${suffix ? 'pr-8' : ''} ${className}`}
       />
       {suffix && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
@@ -197,14 +201,17 @@ function PctInput({ value, onChange, min = -20, max = 30 }) {
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => () => clearTimeout(timerRef.current), [])
   return (
     <div className="relative flex items-center">
-      <input type="text" inputMode="decimal"
+      <input ref={inputRef} type="text" inputMode="decimal"
         value={focused ? local : String(value ?? 0)}
-        onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
+        onFocus={() => { setFocused(true); prevValue.current = value; setLocal(String(value ?? 0)) }}
         onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(Math.min(max, Math.max(min, n))), 250) } }}
-        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local); onChange(!isNaN(n) ? Math.min(max, Math.max(min, n)) : (value ?? 0)) }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local); const v = !isNaN(n) ? Math.min(max, Math.max(min, n)) : (value ?? 0); onChange(v); if (v !== prevValue.current) flashCommit(inputRef.current) }}
+        onKeyDown={e => handleArrowKeys(e, { value: parseFloat(local) || value, step: 0.5, min, max, onChange: v => { onChange(v); setLocal(String(v)) } })}
         className="input-field text-xs py-1.5 pr-7 no-spinner"
       />
       <span className="absolute right-2.5 text-gray-400 text-xs select-none">%</span>
@@ -303,15 +310,15 @@ function AmortizationTable({ mortgage, propertyValue = 0, appreciation = 0 }) {
       {/* Summary chips */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="bg-rose-50 dark:bg-rose-900/20 rounded-lg px-2 py-2">
-          <p className="text-[9px] text-rose-500 dark:text-rose-400 uppercase tracking-wider font-semibold">Total Interest</p>
+          <p className="text-[10px] text-rose-500 dark:text-rose-400 uppercase tracking-wider font-semibold">Total Interest</p>
           <p className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums">{fmtK(totalInterest)}</p>
         </div>
         <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-lg px-2 py-2">
-          <p className="text-[9px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-semibold">Total Paid</p>
+          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-semibold">Total Paid</p>
           <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">{fmtK(totalPayments)}</p>
         </div>
         <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg px-2 py-2">
-          <p className="text-[9px] text-blue-500 dark:text-blue-400 uppercase tracking-wider font-semibold">Payoff Year</p>
+          <p className="text-[10px] text-blue-500 dark:text-blue-400 uppercase tracking-wider font-semibold">Payoff Year</p>
           <p className="text-xs font-bold text-blue-600 dark:text-blue-300">{payoffYear}</p>
         </div>
       </div>
@@ -326,7 +333,7 @@ function AmortizationTable({ mortgage, propertyValue = 0, appreciation = 0 }) {
           <div className="h-full bg-emerald-500" style={{ width: `${totalPrincipal / totalPayments * 100}%` }} />
           <div className="h-full bg-rose-400" style={{ width: `${totalInterest / totalPayments * 100}%` }} />
         </div>
-        <div className="flex justify-between text-[9px] mt-0.5">
+        <div className="flex justify-between text-[10px] mt-0.5">
           <span className="text-emerald-600 dark:text-emerald-400">■ Principal {fmtK(totalPrincipal)}</span>
           <span className="text-rose-500 dark:text-rose-400">■ Interest {fmtK(totalInterest)}</span>
         </div>
@@ -556,7 +563,7 @@ function DCFModal({ property, onClose, onCommit }) {
       <input type="range" min={min} max={max} step={step} value={inputs[k]}
         onChange={e => set(k, parseFloat(e.target.value))}
         className="w-full h-1.5 rounded-full accent-brand-600 cursor-pointer" />
-      {hint && <p className="text-[9px] text-gray-400 mt-0.5">{hint}</p>}
+      {hint && <p className="text-[10px] text-gray-400 mt-0.5">{hint}</p>}
     </div>
   )
 
@@ -634,7 +641,7 @@ function DCFModal({ property, onClose, onCommit }) {
                 { label: 'IRR',             val: irrPct,                                                           cls: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/30' },
               ].map(({ label, val, cls, bg }) => (
                 <div key={label} className={`rounded-xl border p-3 ${bg}`}>
-                  <p className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{label}</p>
+                  <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{label}</p>
                   <p className={`text-sm font-bold tabular-nums ${cls}`}>{val}</p>
                 </div>
               ))}
@@ -778,7 +785,7 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
           { label: 'Equity',   val: equity,                                                              cls: equity >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400' },
         ].map(({ label, val, cls, dash }) => (
           <div key={label} className="px-3 py-2.5 text-center">
-            <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">{label}</p>
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">{label}</p>
             <p className={`text-sm font-bold tabular-nums ${cls}`}>{dash ? '—' : `$${val.toLocaleString()}`}</p>
           </div>
         ))}
@@ -823,7 +830,7 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                       <label className="label">
                         Annual Appreciation
                         {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined && (
-                          <span className="ml-1 text-[9px] font-semibold text-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-1 py-0.5 rounded">DCF</span>
+                          <span className="ml-1 text-[10px] font-semibold text-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-1 py-0.5 rounded">DCF</span>
                         )}
                       </label>
                       <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
@@ -867,7 +874,7 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                     >
                       <span>📊</span>
                       <span>DCF Analysis — model implied appreciation</span>
-                      {property.dcfInputs && <span className="ml-auto text-[9px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">Last run saved</span>}
+                      {property.dcfInputs && <span className="ml-auto text-[10px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">Last run saved</span>}
                     </button>
                   )}
                 </>

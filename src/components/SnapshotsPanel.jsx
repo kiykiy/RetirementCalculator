@@ -94,19 +94,20 @@ export default function SnapshotsPanel({ snapshots, activeSnapshotName, onSave, 
       <button
         ref={btnRef}
         onClick={() => setOpen(v => !v)}
-        title="Snapshots"
-        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+        title="Save & compare retirement scenarios"
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors ${
           open
             ? 'bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-300'
-            : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-300'
         }`}
       >
         {/* Bookmark icon */}
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+        <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
           <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
         </svg>
+        <span className="hidden sm:inline">Snapshots</span>
         {snapshots.length > 0 && (
-          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-violet-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+          <span className="w-4 h-4 bg-violet-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none flex-shrink-0">
             {snapshots.length > 9 ? '9+' : snapshots.length}
           </span>
         )}

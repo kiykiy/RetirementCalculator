@@ -625,9 +625,10 @@ function classifyPlaidTxn(t) {
   ) return { type: 'transfer' }
 
   // ── Debt payments ──
+  const desc = (t.name ?? t.description ?? '').toLowerCase()
   if (pfcDetail.includes('credit_card_payment') || cats.includes('credit card'))
     return { type: 'debt_payment', debtLabel: 'Credit Card' }
-  if (pfcDetail.includes('mortgage_payment') || (cats.includes('bank fees') && cats.includes('mortgage')))
+  if (pfcDetail.includes('mortgage_payment') || cats.includes('mortgage') || /mortgage/i.test(desc))
     return { type: 'debt_payment', debtLabel: 'Mortgage' }
   if (pfc === 'loan_payments' || cats.includes('loan payment'))
     return { type: 'debt_payment', debtLabel: 'Loan Payment' }

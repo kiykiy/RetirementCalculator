@@ -6,6 +6,7 @@ import { CppOasContent } from './CppOasOptimizer.jsx'
 import RrifMeltdownOptimizer from './RrifMeltdownOptimizer.jsx'
 import { runSimulation } from '../lib/simulate.js'
 import { calcTax } from '../lib/tax.js'
+import { formatWhileEditing, parseFormatted, handleArrowKeys, flashCommit } from '../lib/inputHelpers.js'
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ function Field({ label, id, children, className = '' }) {
 
 function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, className = '' }) {
   const isPct = suffix === '%'
+  const showSteppers = !isPct && !prefix && min !== undefined && max !== undefined && (max - min) <= 80 && step >= 1
 
   function fmt(v) {
     const n = parseFloat(String(v).replace(/,/g, ''))
@@ -30,18 +32,22 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
   const [local, setLocal] = useState(fmt(value))
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => { if (!focused) setLocal(fmt(value)) }, [value])
   useEffect(() => () => clearTimeout(timerRef.current), [])
 
   function handleFocus() {
     setFocused(true)
-    const n = parseFloat(local.replace(/,/g, ''))
-    setLocal(isNaN(n) ? '' : String(n))
+    prevValue.current = value
+    // Keep commas while editing for currency fields
+    setLocal(isPct ? String(value ?? 0) : fmt(value))
   }
   function handleChange(e) {
     const raw = e.target.value
-    setLocal(raw)
-    const n = parseFloat(raw.replace(/,/g, ''))
+    const formatted = isPct ? raw : formatWhileEditing(raw)
+    setLocal(formatted)
+    const n = parseFormatted(formatted)
     if (!isNaN(n)) {
       clearTimeout(timerRef.current)
       timerRef.current = setTimeout(() => onChange(n), 250)
@@ -50,25 +56,49 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
   function handleBlur() {
     clearTimeout(timerRef.current)
     setFocused(false)
-    const n = parseFloat(local.replace(/,/g, ''))
+    const n = parseFormatted(local)
     if (isNaN(n)) { setLocal(fmt(value)) }
-    else { const v = isPct ? n : Math.round(n); onChange(v); setLocal(fmt(v)) }
+    else {
+      const v = isPct ? n : Math.round(n)
+      onChange(v)
+      setLocal(fmt(v))
+      if (v !== prevValue.current) flashCommit(inputRef.current)
+    }
+  }
+  function onKeyDown(e) {
+    handleArrowKeys(e, { value: parseFormatted(local) || value, step, min, max, onChange: v => { onChange(v); setLocal(fmt(v)) } })
+  }
+  function stepBy(delta) {
+    const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, (value ?? 0) + delta))
+    onChange(next)
   }
 
   return (
     <div className="relative flex items-center">
-      {prefix && <span className="absolute left-2.5 text-gray-400 text-xs select-none">{prefix}</span>}
+      {showSteppers && (
+        <button type="button" tabIndex={-1} onClick={() => stepBy(-step)}
+          className="absolute left-0.5 z-10 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-sm font-medium select-none"
+          aria-label="Decrease">−</button>
+      )}
+      {prefix && !showSteppers && <span className="absolute left-2.5 text-gray-400 text-xs select-none">{prefix}</span>}
       <input
+        ref={inputRef}
         id={id}
         type="text"
         inputMode={isPct ? 'decimal' : 'numeric'}
-        className={`input-field text-xs py-1.5 ${prefix ? 'pl-6' : ''} ${suffix ? 'pr-8' : ''} ${className}`}
+        className={`input-field text-xs py-1.5 ${showSteppers ? 'px-8 text-center tabular-nums' : prefix ? 'pl-6' : ''} ${suffix && !showSteppers ? 'pr-8' : ''} ${className}`}
         value={local}
         onChange={handleChange}
         onFocus={handleFocus}
         onBlur={handleBlur}
+        onKeyDown={onKeyDown}
       />
-      {suffix && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
+      {suffix && !showSteppers && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
+      {showSteppers && (
+        <button type="button" tabIndex={-1} onClick={() => stepBy(step)}
+          className="absolute right-0.5 z-10 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-sm font-medium select-none"
+          aria-label="Increase">+</button>
+      )}
     </div>
   )
 }
@@ -125,7 +155,7 @@ function SliderField({ label, value, onChange, min, max, step = 1, suffix = '', 
         step={step}
         value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
-        className="w-full h-1 accent-gray-900 dark:accent-white cursor-pointer rounded-full"
+        className="w-full accent-gray-900 dark:accent-white cursor-pointer"
       />
       <div className="flex justify-between text-[10px] text-gray-300 dark:text-gray-600">
         <span>{min}{suffix}</span><span>{max}{suffix}</span>
@@ -383,15 +413,15 @@ const NAV_ITEMS = [
   { key: 'inflation',  label: 'Inflation'                        },
   { key: 'cpp',        label: 'CPP'                              },
   { key: 'oas',        label: 'OAS'                              },
-  { key: 'pension',    label: 'DB Pension'                       },
+  { key: 'pension',    label: 'Workplace Pension'                 },
   { key: 'other',      label: 'Other Income'                     },
   { key: 'retincome',  label: 'Ret. Income'                      },
   { key: 'tax',        label: 'Tax'                              },
   { key: 'estate',     label: 'Estate'                           },
   { divider: true,     label: 'Tools'                            },
   { key: 'cppoas',     label: 'CPP/OAS Timing', cardWidth: 520  },
-  { key: 'meltdown',   label: 'RRSP Meltdown',  cardWidth: 480  },
-  { key: 'gis',        label: 'GIS Check',      cardWidth: 340  },
+  { key: 'meltdown',   label: 'RRSP Tax Optimizer', cardWidth: 480 },
+  { key: 'gis',        label: 'Low-Income Benefits', cardWidth: 340 },
   { key: 'sensitivity',label: 'Sensitivity',     cardWidth: 420  },
   { key: 'survivor',   label: 'Survivor',        cardWidth: 400  },
 ]
@@ -618,7 +648,7 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
               onClick={onOpenAccounts}
               className="w-full text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 border border-brand-200 dark:border-brand-800 hover:border-brand-300 rounded-lg py-1 transition-colors font-medium mt-0.5"
             >
-              → Open Accounts App
+              → Open Accounts Module
             </button>
           </div>
         )

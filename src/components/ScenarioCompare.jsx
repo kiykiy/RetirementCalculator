@@ -131,7 +131,7 @@ export default function ScenarioCompare({ snapshots, currentInputs, currentPerso
     { label: 'Final Balance',           a: sA.finalBalance,           b: sB.finalBalance,           fmt: fmtM, better: true },
     { label: 'Total Net Income',        a: sA.totalNetIncome,         b: sB.totalNetIncome,         fmt: fmtM, better: true },
     { label: 'Total Tax Paid',          a: sA.totalTaxPaid,           b: sB.totalTaxPaid,           fmt: fmtM, better: false },
-    { label: 'Avg Effective Rate',      a: sA.avgEffectiveRate,       b: sB.avgEffectiveRate,       fmt: fmtPct, better: false, isPct: true },
+    { label: 'Avg Tax Rate',            a: sA.avgEffectiveRate,       b: sB.avgEffectiveRate,       fmt: fmtPct, better: false, isPct: true },
     { label: 'Years Funded',            a: sA.yearsInRetirement,      b: sB.yearsInRetirement,      fmt: v => `${v} yrs`, better: true },
     { label: 'RE Equity at Death',      a: sA.reEquityAtDeath ?? 0,   b: sB.reEquityAtDeath ?? 0,   fmt: fmtM, better: true },
   ] : []

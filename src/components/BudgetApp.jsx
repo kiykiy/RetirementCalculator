@@ -1,4 +1,5 @@
 import { useState, Fragment, useMemo, useRef, useEffect } from 'react'
+import { formatWhileEditing, parseFormatted, handleArrowKeys, flashCommit } from '../lib/inputHelpers.js'
 import ExpenseTracker from './ExpenseTracker.jsx'
 import { buildDemoTransactions } from './ExpenseTracker.jsx'
 import { createPortal } from 'react-dom'
@@ -39,7 +40,7 @@ const BUDGET_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'income',    label: 'Income'    },
   { id: 'plan',      label: 'Plan'      },
-  { id: 'capex',     label: 'CapEx'     },
+  { id: 'capex',     label: 'Big Purchases' },
   { id: 'goals',     label: 'Goals'     },
 ]
 
@@ -245,21 +246,24 @@ function Toggle({ value, onChange }) {
   )
 }
 
-function MoneyInput({ value, onChange, className = '', placeholder = '' }) {
+function MoneyInput({ value, onChange, className = '', placeholder = '', compact = false }) {
   const [local, setLocal]   = useState('')
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => () => clearTimeout(timerRef.current), [])
-  const onFocus  = () => { setFocused(true); setLocal(String(value ?? '')) }
-  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
-  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g,'')); if (!isNaN(n)) { onChange(Math.round(n)); setLocal(Math.round(n).toLocaleString()) } else setLocal((value??0).toLocaleString()) }
+  const onFocus  = () => { setFocused(true); prevValue.current = value; setLocal((value??0).toLocaleString()) }
+  const onChg    = e => { const f = formatWhileEditing(e.target.value); setLocal(f); const n = parseFormatted(f); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
+  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFormatted(local); if (!isNaN(n)) { const v = Math.round(n); onChange(v); setLocal(v.toLocaleString()); if (v !== prevValue.current) flashCommit(inputRef.current) } else setLocal((value??0).toLocaleString()) }
   return (
     <div className={`relative flex items-center ${className}`}>
-      <span className="absolute left-2.5 text-gray-400 text-xs pointer-events-none">$</span>
-      <input type="text" inputMode="numeric" placeholder={placeholder}
+      <span className={`absolute left-2 text-gray-400 pointer-events-none ${compact ? 'text-[11px]' : 'text-xs'}`}>$</span>
+      <input ref={inputRef} type="text" inputMode="numeric" placeholder={placeholder}
         value={focused ? local : (value??0).toLocaleString()}
         onFocus={onFocus} onChange={onChg} onBlur={onBlur}
-        className="input-field pl-5 pr-2 text-right no-spinner w-full" />
+        onKeyDown={e => handleArrowKeys(e, { value: parseFormatted(local) || value, step: 100, min: 0, onChange: v => { onChange(v); setLocal(v.toLocaleString()) } })}
+        className={`input-field pl-4 pr-2 text-right no-spinner w-full ${compact ? '!text-xs !py-1' : ''}`} />
     </div>
   )
 }
@@ -269,13 +273,14 @@ function CellInput({ value, onChange }) {
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
   useEffect(() => () => clearTimeout(timerRef.current), [])
-  const onFocus  = () => { setFocused(true); setLocal(value === 0 ? '' : String(value)) }
-  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
-  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g,'')); onChange(isNaN(n) ? 0 : Math.round(n)) }
+  const onFocus  = () => { setFocused(true); setLocal(value === 0 ? '' : value.toLocaleString()) }
+  const onChg    = e => { const f = formatWhileEditing(e.target.value); setLocal(f); const n = parseFormatted(f); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
+  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFormatted(local); onChange(isNaN(n) ? 0 : Math.round(n)) }
   return (
     <input type="text" inputMode="numeric" placeholder="0"
       value={focused ? local : (value === 0 ? '' : value.toLocaleString())}
       onFocus={onFocus} onChange={onChg} onBlur={onBlur}
+      onKeyDown={e => handleArrowKeys(e, { value: parseFormatted(local) || value, step: 50, min: 0, onChange: v => { onChange(v); setLocal(v === 0 ? '' : v.toLocaleString()) } })}
       className="w-[52px] text-right text-[11px] px-1 py-0.5 rounded border border-transparent hover:border-gray-200 dark:hover:border-gray-700 focus:border-brand-300 dark:focus:border-brand-600 focus:outline-none focus:bg-white dark:focus:bg-gray-800 bg-transparent tabular-nums placeholder:text-gray-200 dark:placeholder:text-gray-700 transition-colors"
     />
   )
@@ -1272,7 +1277,7 @@ function ExpensesTab({
 
 // ─── CapEx Tab ────────────────────────────────────────────────────────────────
 
-function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem, onAddCapexSubItem, onRemoveCapexSubItem, onUpdateCapexSubItem, onOptimize, reserveBal = 0, darkMode = false, lifeExpectancy = 90, currentAge = 40 }) {
+function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem, onAddCapexSubItem, onRemoveCapexSubItem, onUpdateCapexSubItem, onOptimize, reserveBal = 0, darkMode = false, lifeExpectancy = 90, currentAge = 40, cashAccounts = [], reserveAccountId = null, onSetReserveAccountId }) {
   const rawItems = capex.flatMap(g => g.items ?? [])
   const totalMo  = rawItems.reduce((s, item) => s + capexMonthly(item), 0)
   const isOptimized = rawItems.some(item =>
@@ -1284,8 +1289,8 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
 
       {/* Summary strip + Optimize button */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        {totalMo > 0 ? (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {totalMo > 0 && (<>
             <span className="text-[11px] text-gray-500 dark:text-gray-400">Total reserve</span>
             <span className="text-[11px] font-semibold tabular-nums text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 rounded-md">
               {fmtFull(totalMo)}/mo · {fmtFull(totalMo * 12)}/yr
@@ -1293,8 +1298,35 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
             {isOptimized && (
               <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-md">✓ Optimized</span>
             )}
+          </>)}
+
+          {/* Reserve account picker */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-gray-400 dark:text-gray-500 whitespace-nowrap">Reserve account</span>
+            {cashAccounts.length > 0 ? (
+              <select
+                value={reserveAccountId ?? ''}
+                onChange={e => onSetReserveAccountId(e.target.value || null)}
+                className="text-[11px] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md px-2 py-0.5 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-400 cursor-pointer"
+              >
+                <option value="">— not linked —</option>
+                {cashAccounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}{reserveBal > 0 && a.id === reserveAccountId ? ` · ${fmtFull(reserveBal)}` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-[11px] text-amber-500 dark:text-amber-400">Add a cash account in Accounts first</span>
+            )}
+            {reserveAccountId && reserveBal > 0 && (
+              <span className="text-[11px] tabular-nums font-medium text-emerald-600 dark:text-emerald-400">{fmtFull(reserveBal)} balance</span>
+            )}
+            <span className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+              {reserveAccountId ? 'Outlook uses linked account balance' : 'Outlook assumes 3% return · link an account to use its balance'}
+            </span>
           </div>
-        ) : <div />}
+        </div>
         {rawItems.length > 0 && (
           <div className="flex items-center gap-2">
             {isOptimized && (
@@ -1303,16 +1335,25 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
                 className="text-[11px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline transition-colors"
               >Reset</button>
             )}
-            <button
-              onClick={() => onOptimize(true)}
-              className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M2 8h2m8 0h2M8 2v2m0 8v2M4.5 4.5l1.5 1.5m4 4l1.5 1.5M4.5 11.5l1.5-1.5m4-4l1.5-1.5"/>
-                <circle cx="8" cy="8" r="2"/>
-              </svg>
-              Optimize Contributions
-            </button>
+            <div className="relative group">
+              <button
+                onClick={() => onOptimize(true)}
+                className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors shadow-sm"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M2 8h2m8 0h2M8 2v2m0 8v2M4.5 4.5l1.5 1.5m4 4l1.5 1.5M4.5 11.5l1.5-1.5m4-4l1.5-1.5"/>
+                  <circle cx="8" cy="8" r="2"/>
+                </svg>
+                Optimize Contributions
+              </button>
+              {/* Hover tooltip */}
+              <div className="absolute right-0 top-full mt-2 w-72 bg-gray-900 text-white text-[11px] leading-relaxed rounded-xl px-3.5 py-3 shadow-2xl z-50 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                <p className="font-semibold text-white mb-1.5">How Optimize Contributions works</p>
+                <p className="text-gray-300 mb-2">Your reserve fund should sit in a dedicated account earning a return (e.g. a HISA or short-term GIC). Because the balance compounds over time, the amount you need to contribute each month decreases — the snowball does more and more of the work.</p>
+                <p className="text-gray-300">This button calculates the <span className="text-white font-medium">minimum monthly contribution</span> for each item based on its cost, how many years until you'll need it, and an assumed growth rate — so you hit the target exactly without over-saving.</p>
+                <div className="mt-2 pt-2 border-t border-gray-700 text-gray-400 text-[10px]">Assumes 3% annual return on the reserve balance (conservative HISA/GIC rate).</div>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -1344,11 +1385,11 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
               {/* Leaf: cost + interval inline */}
               {!hasSub && (
                 <div className="flex items-center gap-1.5">
-                  <MoneyInput value={item.cost} onChange={v => onUpdateCapexItem(item.id, 'cost', v)} className="flex-1 min-w-0" />
+                  <MoneyInput value={item.cost} onChange={v => onUpdateCapexItem(item.id, 'cost', v)} className="flex-1 min-w-0" compact />
                   <div className="relative w-[60px] flex-shrink-0">
                     <input type="number" min={1} max={99} value={item.intervalYears}
                       onChange={e => onUpdateCapexItem(item.id, 'intervalYears', Math.max(1, parseInt(e.target.value) || 1))}
-                      className="input-field text-right no-spinner pr-4 w-full text-[11px]" />
+                      className="input-field text-right no-spinner pr-5 w-full !text-xs !py-1" />
                     <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 text-[10px] pointer-events-none">y</span>
                   </div>
                 </div>
@@ -1362,16 +1403,16 @@ function CapExTab({ capex, onAddCapexItem, onRemoveCapexItem, onUpdateCapexItem,
                     return (
                       <div key={si.id} className="flex items-center gap-1 bg-gray-50 dark:bg-gray-800/60 rounded-md px-1.5 py-0.5">
                         <input
-                          className="flex-1 min-w-0 text-[11px] bg-transparent border-none outline-none focus:ring-0 focus:bg-white dark:focus:bg-gray-700 rounded px-0.5 text-gray-600 dark:text-gray-400 truncate"
+                          className="flex-1 min-w-0 text-xs bg-transparent border-none outline-none focus:ring-0 focus:bg-white dark:focus:bg-gray-700 rounded px-0.5 text-gray-600 dark:text-gray-400 truncate"
                           value={si.name}
                           onChange={e => onUpdateCapexSubItem(item.id, si.id, 'name', e.target.value)}
                           placeholder="Name"
                         />
-                        <MoneyInput value={si.cost} onChange={v => onUpdateCapexSubItem(item.id, si.id, 'cost', v)} className="w-[100px] flex-shrink-0" />
+                        <MoneyInput value={si.cost} onChange={v => onUpdateCapexSubItem(item.id, si.id, 'cost', v)} className="w-[100px] flex-shrink-0" compact />
                         <div className="relative w-[48px] flex-shrink-0">
                           <input type="number" min={1} max={99} value={si.intervalYears}
                             onChange={e => onUpdateCapexSubItem(item.id, si.id, 'intervalYears', Math.max(1, parseInt(e.target.value) || 1))}
-                            className="input-field text-right no-spinner pr-4 w-full text-[11px] py-1" />
+                            className="input-field text-right no-spinner pr-5 w-full !text-xs !py-1" />
                           <span className="absolute right-1 top-1/2 -translate-y-1/2 text-gray-400 text-[10px] pointer-events-none">y</span>
                         </div>
                         {siMo > 0 && <span className="text-[10px] text-gray-400 tabular-nums w-9 text-right flex-shrink-0">{fmtFull(siMo)}</span>}
@@ -1532,7 +1573,7 @@ function AccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, projBala
           </>
         )}
 
-        {/* Parent account — sub-account rows */}
+        {/* Parent account — bucket rows */}
         {hasSub && (
           <div className="space-y-0.5">
             {acc.subAccounts.map(sa => (
@@ -1559,13 +1600,13 @@ function AccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, projBala
           </div>
         )}
 
-        {/* Add sub-account */}
+        {/* Add bucket */}
         {onAddSubAccount && (
           <button
             onClick={() => onAddSubAccount(acc.id)}
             className="flex items-center gap-0.5 text-[10px] text-gray-300 hover:text-brand-500 dark:text-gray-600 dark:hover:text-brand-400 transition-colors"
           >
-            <span className="text-xs leading-none">+</span> add sub-account
+            <span className="text-xs leading-none">+</span> add bucket
           </button>
         )}
 
@@ -2175,7 +2216,7 @@ function BudgetSankey({ expenseSections, capex, totalNet,
             <span className="text-[11px] font-bold text-gray-900 dark:text-gray-100 leading-tight">{tooltip.label}</span>
           </div>
           {tooltip.section && (
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 mb-2">{tooltip.section}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">{tooltip.section}</p>
           )}
           <div className="space-y-1">
             <div className="flex justify-between gap-4">
@@ -2393,11 +2434,11 @@ function DashboardTab({
   const chartExpByMonth = Array(12).fill(0).map((_, mi) =>
     expenseSections.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item, chartYear)[mi] ?? 0), 0)
   )
-  const cashflowChartData = MONTHS.map((m, mi) => ({
-    month: m,
-    income: totalNet,
-    expense: -(chartExpByMonth[mi] + totalCapexMo),
-  }))
+  const cashflowChartData = MONTHS.map((m, mi) => {
+    const inc = totalNet
+    const exp = -(chartExpByMonth[mi] + totalCapexMo)
+    return { month: m, income: inc, expense: exp, net: inc + exp }
+  })
 
   // ── Recent transactions (last 8, non-demo, date desc) ───────────────────────
   const recentTxns = useMemo(() =>
@@ -2444,7 +2485,7 @@ function DashboardTab({
           <div className="grid grid-cols-3 gap-3">
             {/* Cash & Savings */}
             <div>
-              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Cash</p>
+              <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Cash</p>
               {displayCash.length === 0 ? (
                 <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
               ) : (
@@ -2465,7 +2506,7 @@ function DashboardTab({
             </div>
             {/* Investments */}
             <div>
-              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Investments</p>
+              <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Investments</p>
               {displayInvestments.length === 0 ? (
                 <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
               ) : (
@@ -2486,7 +2527,7 @@ function DashboardTab({
             </div>
             {/* Debt */}
             <div>
-              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Debt</p>
+              <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1.5">Debt</p>
               {displayDebt.length === 0 ? (
                 <p className="text-[10px] text-gray-300 dark:text-gray-600 italic">None</p>
               ) : (
@@ -2511,7 +2552,7 @@ function DashboardTab({
           {displayOtherAssets.length > 0 && (
             <div className="pt-2 mt-1 border-t border-gray-100 dark:border-gray-800">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Other Assets</p>
+                <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Other Assets</p>
                 <span className="text-[10px] font-bold tabular-nums text-gray-900 dark:text-gray-100">{fmtFull(totalOtherAssets)}</span>
               </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
@@ -2529,7 +2570,7 @@ function DashboardTab({
         <div className="card !p-4">
           <div className="flex items-start justify-between mb-2 gap-3 flex-wrap">
             <div>
-              <p className="text-[9px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">Net Worth</p>
+              <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-0.5">Net Worth</p>
               <p className={`text-xl font-bold tabular-nums ${totalNW >= 0 ? 'text-gray-900 dark:text-gray-100' : 'text-red-600 dark:text-red-400'}`}>
                 {totalNW < 0 ? '−' : ''}{fmtFull(Math.abs(totalNW))}
               </p>
@@ -2830,9 +2871,12 @@ function DashboardTab({
             </div>
             {/* Legend */}
             <div className="flex items-center gap-3">
-              {[['#10b981', 'Income'], ['#ef4444', 'Expenses']].map(([color, label]) => (
+              {[['#10b981', 'Income'], ['#ef4444', 'Expenses'], ['#6366f1', 'Net']].map(([color, label]) => (
                 <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
+                  {label === 'Net'
+                    ? <span className="inline-block w-3 h-0.5 rounded" style={{ background: color }} />
+                    : <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
+                  }
                   {label}
                 </span>
               ))}
@@ -2840,20 +2884,22 @@ function DashboardTab({
           </div>
         </div>
         <ResponsiveContainer width="100%" height={180}>
-          <ComposedChart data={cashflowChartData} barCategoryGap="30%" margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
+          <ComposedChart data={cashflowChartData} barSize={24} barGap={-24} margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
             <XAxis dataKey="month" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={v => yFmt(Math.abs(v))} width={46} />
             <ReTooltip
               contentStyle={tooltipStyle}
               formatter={(value, name) => {
-                const labels = { income: 'Income', expense: 'Expenses' }
-                return [`$${fmtNum(Math.round(Math.abs(value)))}`, labels[name] ?? name]
+                const labels = { income: 'Income', expense: 'Expenses', net: 'Net' }
+                const prefix = name === 'net' ? (value >= 0 ? '+' : '') : ''
+                return [`${prefix}$${fmtNum(Math.round(Math.abs(value)))}`, labels[name] ?? name]
               }}
             />
             <ReferenceLine y={0} stroke={darkMode ? '#4b5563' : '#d1d5db'} strokeWidth={1.5} />
-            <Bar dataKey="income" name="income" maxBarSize={16} radius={[3, 3, 0, 0]} fill="#10b981" fillOpacity={0.85} />
-            <Bar dataKey="expense" name="expense" maxBarSize={16} radius={[0, 0, 3, 3]} fill="#ef4444" fillOpacity={0.85} />
+            <Bar dataKey="income" name="income" radius={[3, 3, 0, 0]} fill="#10b981" fillOpacity={0.85} />
+            <Bar dataKey="expense" name="expense" radius={[0, 0, 3, 3]} fill="#ef4444" fillOpacity={0.85} />
+            <Line dataKey="net" name="net" type="monotone" stroke="#6366f1" strokeWidth={2} dot={{ r: 2.5, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 4, strokeWidth: 0 }} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -2894,7 +2940,7 @@ function DashboardTab({
 // ─── Main BudgetApp ───────────────────────────────────────────────────────────
 
 export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard', onTabChange, lifeExpectancy = 90, currentAge = 40, retirementInputs = {}, onOpenAccounts, demoMode = false }) {
-  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [], debtAccounts = [], transactions = [], otherAssets = [], properties = [] } = budget
+  const { incomes, expenseSections = [], capex = [], province = 'ON', cashAccounts = [], investmentAccounts = [], goals = [], debtAccounts = [], transactions = [], otherAssets = [], properties = [], reserveAccountId = null } = budget
 
   const [planYear, setPlanYear] = useState(new Date().getFullYear())
 
@@ -3053,10 +3099,13 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
   const totalTax      = enabledCalcs.reduce((s, c) => s + c.tax,   0)
   const totalNet      = enabledCalcs.reduce((s, c) => s + c.net,   0)
 
-  const reserveBal    = cashAccounts.reduce((s, a) => {
-    if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name === 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
-    return s
-  }, 0)
+  const reserveAccount = reserveAccountId ? cashAccounts.find(a => a.id === reserveAccountId) : null
+  const reserveBal    = reserveAccount
+    ? (reserveAccount.balance ?? 0) + (reserveAccount.subAccounts ?? []).reduce((s, sa) => s + (sa.balance ?? 0), 0)
+    : cashAccounts.reduce((s, a) => {
+        if (a.subAccounts?.length > 0) return s + a.subAccounts.filter(sa => sa.name === 'Reserve').reduce((ss, sa) => ss + (sa.balance ?? 0), 0)
+        return s
+      }, 0)
   const leafItems     = allLeafItems(expenseSections)
   const totalExpenses = expenseSections.flatMap(s => s.items).reduce((s, i) => s + avgMonthly(i, planYear), 0)
   const totalCapexMo  = flatCapexItems(capex).reduce((s, c) => s + capexMonthly(c), 0)
@@ -3132,6 +3181,9 @@ export default function BudgetApp({ budget, onChange, darkMode, tab = 'dashboard
             onOptimize={optimizeCapexContribs}
             reserveBal={reserveBal} darkMode={darkMode}
             lifeExpectancy={lifeExpectancy} currentAge={currentAge}
+            cashAccounts={cashAccounts}
+            reserveAccountId={reserveAccountId}
+            onSetReserveAccountId={id => upd('reserveAccountId', () => id)}
           />
         )}
         {tab === 'goals' && (

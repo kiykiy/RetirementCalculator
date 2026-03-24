@@ -240,18 +240,18 @@ const BUDGET_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'income',    label: 'Income'    },
   { id: 'plan',      label: 'Plan'      },
-  { id: 'capex',     label: 'CapEx'     },
+  { id: 'capex',     label: 'Big Purchases' },
   { id: 'goals',     label: 'Goals'     },
 ]
 
 const TABS = [
   { id: 'retChart',  label: 'Retirement',            group: 'charts' },
-  { id: 'accChart',  label: 'Accumulation',          group: 'charts' },
+  { id: 'accChart',  label: 'Saving Years',           group: 'charts' },
   { id: 'cashChart',    label: 'Cashflow',        group: 'charts' },
   { id: 'estate',       label: 'Estate',          group: 'charts' },
   { id: 'compare',      label: 'Compare',         group: 'charts' },
   { id: 'retTable',  label: 'Retirement Detailed',   group: 'tables' },
-  { id: 'accTable',  label: 'Accumulation Detailed', group: 'tables' },
+  { id: 'accTable',  label: 'Saving Years Detailed', group: 'tables' },
 ]
 
 const HISTORICAL_EVENTS = [
@@ -1076,69 +1076,74 @@ export default function App() {
         {/* Divider */}
         <div className="w-5 h-px bg-gray-300 dark:bg-gray-700" />
 
-        {/* R — Retirement app */}
+        {/* R — Retirement module */}
         <button
           onClick={() => { setActiveApp('retirement'); setSideNavOpen(false) }}
           title="Retirement Planner"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+          className={`w-9 flex flex-col items-center gap-0.5 transition-all duration-150`}
+        >
+          <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm
             ${activeApp === 'retirement'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-        >
-          R
+            }`}>R</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'retirement' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Retire</span>
         </button>
 
-        {/* B — Budget app */}
+        {/* B — Budget module */}
         <button
           onClick={() => { setActiveApp('budget'); setSideNavOpen(false) }}
           title="Budget Planner"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+          className={`w-9 flex flex-col items-center gap-0.5 transition-all duration-150`}
+        >
+          <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm
             ${activeApp === 'budget'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-        >
-          B
+            }`}>B</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'budget' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Budget</span>
         </button>
 
         {/* T — Transactions */}
         <button
           onClick={() => { setActiveApp('tracking'); setSideNavOpen(false) }}
           title="Transactions"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+          className={`w-9 flex flex-col items-center gap-0.5 transition-all duration-150`}
+        >
+          <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm
             ${activeApp === 'tracking'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-        >
-          T
+            }`}>T</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'tracking' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Spend</span>
         </button>
 
-        {/* A — Accounts app */}
+        {/* A — Accounts module */}
         <button
           onClick={() => { setActiveApp('accounts'); setSideNavOpen(false) }}
           title="Accounts"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
+          className={`w-9 flex flex-col items-center gap-0.5 transition-all duration-150`}
+        >
+          <span className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shadow-sm
             ${activeApp === 'accounts'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-        >
-          A
+            }`}>A</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'accounts' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Accts</span>
         </button>
 
-        {/* P — Real Estate app */}
+        {/* RE — Real Estate module */}
         <button
           onClick={() => { setActiveApp('realestate'); setSideNavOpen(false) }}
           title="Real Estate"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black tracking-tight transition-all duration-150 shadow-sm
+          className={`w-9 flex flex-col items-center gap-0.5 transition-all duration-150`}
+        >
+          <span className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black tracking-tight shadow-sm
             ${activeApp === 'realestate'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-        >
-          RE
+            }`}>RE</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'realestate' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Home</span>
         </button>
 
         {/* Divider before help */}
@@ -1183,18 +1188,18 @@ export default function App() {
               <div className="hidden sm:block flex-shrink-0">
                 {activeApp === 'retirement' ? (
                   <>
-                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Retirement Planner</h1>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Retirement</h1>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Portfolio & Income Simulator</p>
                   </>
                 ) : activeApp === 'tracking' ? (
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Transactions</h1>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Monthly Actuals</p>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Track Your Spending</p>
                   </>
                 ) : activeApp === 'accounts' ? (
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Accounts</h1>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Retirement, Cash & Investments</p>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Balances & Holdings</p>
                   </>
                 ) : activeApp === 'realestate' ? (
                   <>
@@ -1208,7 +1213,7 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Budget Planner</h1>
+                    <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Budget</h1>
                     <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Income & Expense Tracker</p>
                   </>
                 )}
@@ -1507,7 +1512,7 @@ export default function App() {
                       </div>
                       {incomeTargetEnabled && incomeTargetAmount > 0 ? (
                         <p className="text-[11px] text-blue-500 dark:text-blue-400 mt-0.5 whitespace-nowrap font-medium">
-                          ⚡ Income Target: {incomeTargetAmount >= 1000 ? `$${(incomeTargetAmount / 1000).toFixed(0)}K` : `$${incomeTargetAmount}`}/yr
+                          ⚡ Spending Target: {incomeTargetAmount >= 1000 ? `$${(incomeTargetAmount / 1000).toFixed(0)}K` : `$${incomeTargetAmount}`}/yr
                         </p>
                       ) : (
                         <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
@@ -1585,7 +1590,7 @@ export default function App() {
               <div className={`flex-1 border-t border-dashed ${incomeTargetEnabled ? 'border-blue-200 dark:border-blue-800' : 'border-gray-200 dark:border-gray-700'}`} />
             </div>
 
-            {/* Bottom row: Income Target + Scenarios + What-If */}
+            {/* Bottom row: Spending Target + Scenarios + What-If */}
             <div className="flex gap-3 flex-wrap">
 
                 <IncomeTargetPanel
@@ -1621,7 +1626,7 @@ export default function App() {
                           </svg>
                         </div>
                         <p className="text-[11px] text-gray-400 mt-0.5 whitespace-nowrap">
-                          {scenarioActive ? (activeEvent ? activeEvent.name : 'Custom overrides active') : 'Shock Analysis'}
+                          {scenarioActive ? (activeEvent ? activeEvent.name : 'Custom overrides active') : 'What-If Scenarios'}
                         </p>
                       </div>
                     </div>

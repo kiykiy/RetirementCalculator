@@ -68,11 +68,11 @@ function HelpContent() {
     <div className="space-y-3 max-w-3xl mx-auto">
 
       <HelpSection icon="🚀" title="Getting Started" defaultOpen>
-        <HelpRow term="6 Apps">
-          Navigate using the left icon rail: <strong>R</strong> = Retirement Planner, <strong>B</strong> = Budget Planner, <strong>T</strong> = Transactions, <strong>A</strong> = Accounts, <strong>🏠</strong> = Real Estate, <strong>?</strong> = Help (you are here).
+        <HelpRow term="6 Modules">
+          Navigate using the left icon rail: <strong>R</strong> = Retirement, <strong>B</strong> = Budget, <strong>T</strong> = Transactions, <strong>A</strong> = Accounts, <strong>RE</strong> = Real Estate, <strong>?</strong> = Help (you are here).
         </HelpRow>
         <HelpRow term="DEMO Mode" badge="top-right">
-          Toggle the <em>DEMO</em> switch in the top-right header to populate all apps with realistic sample data. Your real data is not overwritten — demo data is layered on top.
+          Toggle the <em>DEMO</em> switch in the top-right header to populate all modules with realistic sample data. Your real data is not overwritten — demo data is layered on top.
         </HelpRow>
         <HelpRow term="Auto-Save">
           All changes are saved automatically to your browser's localStorage. Sign in (person icon, top-right) to sync across devices via Supabase cloud save.
@@ -138,7 +138,7 @@ function HelpContent() {
           Monthly expense grid. Three default sections: Non-Controllable (fixed costs), Controllable (discretionary), Savings (RRSP/TFSA contributions). Add sections and items; use sub-items for detailed breakdowns.
         </HelpRow>
         <HelpRow term="CapEx Tab">
-          Capital expense reserves — recurring large purchases (car replacement, roof, appliances). Enter the cost, replacement interval in years, and an optional return rate on the reserve fund. The app calculates monthly contributions needed.
+          Capital expense reserves — recurring large purchases (car replacement, roof, appliances). Enter the cost, replacement interval in years, and an optional return rate on the reserve fund. Monthly contributions are calculated automatically.
         </HelpRow>
         <HelpRow term="Goals Tab">
           Savings targets with target amounts and dates. Progress is tracked against actual balances.
@@ -186,7 +186,7 @@ function HelpContent() {
           Add primary residence, rental properties, vacation homes, commercial, or land. Each property tracks current value, purchase price/date, and annual appreciation rate.
         </HelpRow>
         <HelpRow term="Mortgage">
-          Toggle the Mortgage switch to attach a mortgage. Enter lender, balance, interest rate, amortization months remaining, and renewal date. The app calculates monthly P&I payment using the standard formula: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-[10px]">P = r·PV / (1 − (1+r)⁻ⁿ)</code>
+          Toggle the Mortgage switch to attach a mortgage. Enter lender, balance, interest rate, amortization months remaining, and renewal date. The monthly P&I payment is calculated using the standard formula: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-[10px]">P = r·PV / (1 − (1+r)⁻ⁿ)</code>
         </HelpRow>
         <HelpRow term="Amortization Schedule">
           Click <em>📅 Amortization Schedule</em> inside the mortgage section to see a year-by-year table showing balance, annual interest, annual principal, and projected equity (property value with appreciation minus remaining balance).
@@ -204,7 +204,7 @@ function HelpContent() {
 
       <HelpSection icon="🔘" title="Toggles & Settings">
         <HelpRow term="DEMO Mode">
-          Overlays realistic sample data across all apps (accounts, transactions, real estate). Your real data is preserved. Toggle off to return to your actual data.
+          Overlays realistic sample data across all modules (accounts, transactions, real estate). Your real data is preserved. Toggle off to return to your actual data.
         </HelpRow>
         <HelpRow term="Dark Mode">
           Persists across sessions. Stored in localStorage alongside your inputs.
@@ -216,7 +216,7 @@ function HelpContent() {
           In Spouse inputs. Enables splitting eligible pension income between spouses for tax purposes. Reduces combined tax in most cases.
         </HelpRow>
         <HelpRow term="Portfolio Mix">
-          On each retirement or investment account. Toggle to enter per-asset-class allocations (CA Equity, US Equity, Intl Equity, Fixed Income, Cash/GIC) instead of a single blended return rate. The app calculates a weighted return from the mix and the historical asset-class return assumptions.
+          On each retirement or investment account. Toggle to enter per-asset-class allocations (CA Equity, US Equity, Intl Equity, Fixed Income, Cash/GIC) instead of a single blended return rate. A weighted return is calculated from the mix and the historical asset-class return assumptions.
         </HelpRow>
         <HelpRow term="RRSP Drawdown">
           In the strategy overlay (hover over the Retirement Withdrawals card). Enables bracket-filling withdrawals from RRSP/RRIF before the mandatory RRIF minimum age (71). Set start/end ages and the annual drawdown amount.
@@ -323,7 +323,7 @@ function AuditLogTab({ auditLog, onNavigate }) {
         </div>
         <select value={filterApp} onChange={e => setFilterApp(e.target.value)}
           className="input-field text-xs py-1.5 w-36">
-          <option value="all">All apps</option>
+          <option value="all">All modules</option>
           {Object.entries(APP_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v.label}</option>
           ))}

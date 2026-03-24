@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { calcTfsaLimit, getMixStats, ASSET_CLASSES } from '../lib/simulate.js'
 import { classifyPlaidAccount, debtTypeFromPlaid } from './PlaidConnect.jsx'
+import { formatWhileEditing, parseFormatted, handleArrowKeys, flashCommit } from '../lib/inputHelpers.js'
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -8,6 +9,8 @@ function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, class
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => () => clearTimeout(timerRef.current), [])
   const fmt = v => (typeof v === 'number' && !isNaN(v)) ? v.toLocaleString('en-CA') : '0'
 
@@ -15,12 +18,14 @@ function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, class
     <div className="relative flex items-center">
       {prefix && <span className="absolute left-2.5 text-gray-400 text-xs select-none">{prefix}</span>}
       <input
+        ref={inputRef}
         type="text"
         inputMode="numeric"
         value={focused ? local : fmt(value)}
-        onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
-        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g, '')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }}
-        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g, '')); if (!isNaN(n)) onChange(Math.max(min, n)) }}
+        onFocus={() => { setFocused(true); prevValue.current = value; setLocal(fmt(value ?? 0)) }}
+        onChange={e => { const f = formatWhileEditing(e.target.value); setLocal(f); const n = parseFormatted(f); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFormatted(local); if (!isNaN(n)) { onChange(Math.max(min, n)); if (Math.max(min, n) !== prevValue.current) flashCommit(inputRef.current) } }}
+        onKeyDown={e => handleArrowKeys(e, { value: parseFormatted(local) || value, step, min, onChange: v => { onChange(v); setLocal(fmt(v)) } })}
         className={`input-field text-xs py-1.5 ${prefix ? 'pl-6' : ''} ${suffix ? 'pr-8' : ''} ${className}`}
       />
       {suffix && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
@@ -32,16 +37,20 @@ function PctInput({ value, onChange, min = 0, max = 30 }) {
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
   const timerRef = useRef(null)
+  const inputRef = useRef(null)
+  const prevValue = useRef(value)
   useEffect(() => () => clearTimeout(timerRef.current), [])
   return (
     <div className="relative flex items-center">
       <input
+        ref={inputRef}
         type="text"
         inputMode="decimal"
         value={focused ? local : String(value ?? 0)}
-        onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
+        onFocus={() => { setFocused(true); prevValue.current = value; setLocal(String(value ?? 0)) }}
         onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(Math.min(max, Math.max(min, n))), 250) } }}
-        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local); onChange(!isNaN(n) ? Math.min(max, Math.max(min, n)) : value) }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local); const v = !isNaN(n) ? Math.min(max, Math.max(min, n)) : value; onChange(v); if (v !== prevValue.current) flashCommit(inputRef.current) }}
+        onKeyDown={e => handleArrowKeys(e, { value: parseFloat(local) || value, step: 0.5, min, max, onChange: v => { onChange(v); setLocal(String(v)) } })}
         className="input-field text-xs py-1.5 pr-7 no-spinner"
       />
       <span className="absolute right-2.5 text-gray-400 text-xs select-none">%</span>
@@ -93,7 +102,10 @@ function RetirementAccountCard({ account, onUpdate, onRemove, tfsaLimit, tfsaInd
   const upd = (key, val) => onUpdate({ ...account, [key]: val })
 
   return (
-    <div className="border border-gray-100 dark:border-gray-800 rounded-xl p-3 space-y-2.5 bg-white dark:bg-gray-800/50">
+    <div className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-800/50">
+      {/* Color accent bar */}
+      <div className={`h-1 ${account.taxType === 'rrif' ? 'bg-blue-500' : account.taxType === 'tfsa' ? 'bg-emerald-500' : 'bg-violet-500'}`} />
+      <div className="p-3 space-y-2.5">
       {/* Name row */}
       <div className="flex items-center gap-1.5">
         {isBuiltIn
@@ -122,7 +134,7 @@ function RetirementAccountCard({ account, onUpdate, onRemove, tfsaLimit, tfsaInd
       <div>
         <label className="label flex items-center gap-1">
           Balance
-          {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+          {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
         </label>
         {demoMode
           ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
@@ -209,6 +221,7 @@ function RetirementAccountCard({ account, onUpdate, onRemove, tfsaLimit, tfsaInd
         onUpdate={(f, v) => onUpdate({ ...account, [f]: v })}
         demoMode={demoMode} demoBankIdx={demoBankIdx}
       />
+      </div>
     </div>
   )
 }
@@ -297,7 +310,9 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
   const totalBal = hasSub ? acc.subAccounts.reduce((s, sa) => s + (sa.balance ?? 0), 0) : (acc.balance ?? 0)
 
   return (
-    <div className="border border-gray-100 dark:border-gray-800 rounded-xl p-3 space-y-2.5 bg-white dark:bg-gray-800/50">
+    <div className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-800/50">
+      <div className="h-1 bg-emerald-400" />
+      <div className="p-3 space-y-2.5">
       <div className="flex items-center gap-1.5">
         <input type="text" value={acc.name} onChange={e => onUpdate('name', e.target.value)}
           className="input-field text-xs font-medium flex-1 py-1" placeholder="Account name" />
@@ -307,7 +322,7 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
       <div>
         <label className="label flex items-center gap-1">
           Balance
-          {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+          {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
           {hasSub && <span className="text-[8px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full ml-0.5">auto</span>}
         </label>
         {hasSub
@@ -323,10 +338,10 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
         <PctInput value={acc.rate ?? defaultRate} onChange={v => onUpdate('rate', v)} max={30} />
       </div>
 
-      {/* Internal Splits */}
+      {/* Buckets */}
       {hasSub && (
         <div className="space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Internal Split</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Buckets</p>
           {acc.subAccounts.map(sa => (
             <div key={sa.id} className="flex items-center gap-1.5">
               <input type="text" value={sa.name} onChange={e => onUpdateSub(sa.id, 'name', e.target.value)}
@@ -345,10 +360,11 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
 
       <button onClick={() => onAddSub(acc.id)}
         className="w-full text-[10px] text-gray-400 hover:text-brand-600 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg py-1 transition-colors">
-        + Add Split
+        + Add Bucket
       </button>
 
       <PlaidAccountBadge acc={acc} onUpdate={(f, v) => onUpdate(f, v)} demoMode={demoMode} demoBankIdx={demoBankIdx} />
+      </div>
     </div>
   )
 }
@@ -421,7 +437,10 @@ function DebtAccountCard({ acc, onUpdate, onRemove, demoMode = false, demoBankId
   const typeLabel = DEBT_TYPES.find(t => t.value === (acc.debtType ?? 'credit_card'))?.label ?? 'Debt'
 
   return (
-    <div className="border border-rose-100 dark:border-rose-900/40 rounded-xl p-3 space-y-2.5 bg-white dark:bg-gray-800/50">
+    <div className="border border-rose-100 dark:border-rose-900/40 rounded-xl overflow-hidden bg-white dark:bg-gray-800/50">
+      {/* Red accent bar */}
+      <div className="h-1 bg-rose-400" />
+      <div className="p-3 space-y-2.5">
       {/* Name + remove */}
       <div className="flex items-center gap-1.5">
         <input type="text" value={acc.name} onChange={e => upd('name', e.target.value)}
@@ -439,7 +458,7 @@ function DebtAccountCard({ acc, onUpdate, onRemove, demoMode = false, demoBankId
       <div>
         <label className="label flex items-center gap-1">
           Balance Owing
-          {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+          {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
         </label>
         {demoMode
           ? <p className="text-sm font-semibold text-rose-600 dark:text-rose-400 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
@@ -461,12 +480,16 @@ function DebtAccountCard({ acc, onUpdate, onRemove, demoMode = false, demoBankId
 
       {/* Interest cost indicator */}
       {(acc.balance > 0) && (acc.rate > 0) && (
-        <p className="text-[10px] text-rose-500 dark:text-rose-400 font-medium tabular-nums">
-          ~${Math.round(acc.balance * (acc.rate / 100) / 12).toLocaleString()}/mo in interest
-        </p>
+        <div className="flex items-center gap-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 px-2.5 py-1.5">
+          <span className="text-rose-400 text-xs">🔥</span>
+          <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold tabular-nums">
+            ${Math.round(acc.balance * (acc.rate / 100) / 12).toLocaleString()}/mo in interest
+          </p>
+        </div>
       )}
 
       <PlaidAccountBadge acc={acc} onUpdate={(f, v) => onUpdate(f, v)} demoMode={demoMode} demoBankIdx={demoBankIdx} />
+      </div>
     </div>
   )
 }
@@ -612,10 +635,45 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
   const totalRet        = retAccounts.reduce((s, a) => s + (a.balance ?? 0), 0)
   const totalOtherValue = otherAssets.reduce((s, a) => s + (a.value ?? 0), 0)
 
-  function SectionHeader({ title, total, totalNegative = false, action, children }) {
+  // ── Tooltip helper ──
+  function Tip({ text }) {
+    return (
+      <span className="group relative cursor-help">
+        <span className="text-gray-300 dark:text-gray-600 hover:text-brand-500 text-[10px] leading-none select-none">ⓘ</span>
+        <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-48 rounded-lg bg-gray-900 dark:bg-gray-800 text-white text-[11px] leading-relaxed p-2.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50">
+          {text}
+        </span>
+      </span>
+    )
+  }
+
+  // ── Net Worth Summary ──
+  const totalPropEquity = (budget.properties ?? []).reduce((s, p) => {
+    const val = p.currentValue ?? 0
+    const mort = p.mortgage?.enabled ? (p.mortgage?.balance ?? 0) : 0
+    return s + val - mort
+  }, 0)
+  const netWorth = totalCash + totalInv + totalRet + totalOtherValue + totalPropEquity - totalDebt
+
+  function SummaryCard({ label, amount, color, tip }) {
+    const isNeg = amount < 0
+    const display = `${isNeg ? '-' : ''}$${Math.abs(amount).toLocaleString()}`
+    return (
+      <div className={`rounded-xl border px-3 py-2.5 min-w-0 flex-1 ${color}`}>
+        <div className="flex items-center gap-1">
+          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider truncate">{label}</p>
+          {tip && <Tip text={tip} />}
+        </div>
+        <p className="text-base font-bold tabular-nums mt-0.5 truncate">{display}</p>
+      </div>
+    )
+  }
+
+  function SectionHeader({ title, icon, total, totalNegative = false, action, children }) {
     return (
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <div className="flex items-center gap-2 flex-wrap">
+          {icon && <span className="text-base leading-none">{icon}</span>}
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
           {total > 0 && (
             <span className={`text-xs font-semibold tabular-nums px-2 py-0.5 rounded-lg ${
@@ -653,9 +711,24 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
         </div>
       )}
 
+      {/* ── Net Worth Summary ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        <SummaryCard label="Cash" amount={totalCash} tip="Total across all chequing and savings accounts" color="border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" />
+        <SummaryCard label="Investments" amount={totalRet} tip="RRSP, TFSA, and non-registered accounts for retirement" color="border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-brand-700 dark:text-brand-400" />
+        <SummaryCard label="Debt" amount={totalDebt > 0 ? -totalDebt : 0} tip="Credit cards, loans, and lines of credit owed" color="border-rose-100 dark:border-rose-900/30 bg-rose-50/50 dark:bg-rose-900/10 text-rose-600 dark:text-rose-400" />
+        <SummaryCard label="Property" amount={totalPropEquity} tip="Real estate value minus outstanding mortgages" color="border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" />
+        <SummaryCard label="Other" amount={totalOtherValue} tip="Vehicles, artwork, business interests" color="border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" />
+        <div className={`rounded-xl border-2 px-3 py-2.5 min-w-0 flex-1 ${netWorth >= 0 ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10' : 'border-rose-200 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-900/10'}`}>
+          <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Net Worth</p>
+          <p className={`text-base font-bold tabular-nums mt-0.5 ${netWorth >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            {netWorth < 0 ? '-' : ''}${Math.abs(netWorth).toLocaleString()}
+          </p>
+        </div>
+      </div>
+
       {/* ── Cash & Savings ── */}
       <section>
-        <SectionHeader title="Cash &amp; Savings" total={totalCash} action={
+        <SectionHeader title="Cash &amp; Savings" icon="💰" total={totalCash} action={
           <button onClick={addCash} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
             + Add Account
           </button>
@@ -675,7 +748,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
           )}
         </SectionHeader>
         <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-          Chequing, savings, and cash accounts used in the Budget Dashboard's net worth and cashflow projections.
+          Your everyday bank accounts. Balances flow into the Budget Dashboard and net worth calculations.
         </p>
         {cashAccounts.length === 0 ? (
           <button onClick={addCash}
@@ -714,13 +787,13 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
 
       {/* ── Credit Cards & Debt ── */}
       <section>
-        <SectionHeader title="Credit Cards &amp; Debt" total={totalDebt} totalNegative action={
+        <SectionHeader title="Credit Cards &amp; Debt" icon="💳" total={totalDebt} totalNegative action={
           <button onClick={addDebt} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
             + Add Account
           </button>
         } />
         <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-          Credit cards, lines of credit, loans, and other liabilities. Balances are tracked as money owed.
+          Money you owe. The monthly interest cost is shown on each card so you can see which debts cost the most.
         </p>
         {debtAccounts.length === 0 ? (
           <button onClick={addDebt}
@@ -754,7 +827,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
 
       {/* ── Investments ── */}
       <section>
-        <SectionHeader title="Investments" total={totalRet}>
+        <SectionHeader title="Investments" icon="📈" total={totalRet}>
           {spouseEnabled && (
             <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
               {[{ id: 'primary', label: primaryName }, { id: 'spouse', label: spouseName }].map(p => (
@@ -771,7 +844,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
         </SectionHeader>
 
         <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
-          RRSP, TFSA, and non-registered accounts used in retirement simulations. Changes here update the Retirement Planner automatically.
+          Your retirement savings. Changes here automatically update the Retirement Planner projections.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {retAccounts.map((acc, idx) => (
@@ -804,7 +877,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
 
       {/* ── Other Assets ── */}
       <section>
-        <SectionHeader title="Other Assets" total={totalOtherValue} action={
+        <SectionHeader title="Other Assets" icon="📦" total={totalOtherValue} action={
           <button onClick={addOtherAsset} className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
             + Add Asset
           </button>
@@ -845,7 +918,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
         return (
           <section>
             <div className="border-t border-gray-100 dark:border-gray-800 mb-8" />
-            <SectionHeader title="Real Estate" total={totalPropVal - totalMortDebt}
+            <SectionHeader title="Real Estate" icon="🏠" total={totalPropVal - totalMortDebt}
               action={
                 <button onClick={() => onGoToRealEstate?.()}
                   className="text-xs font-medium text-brand-600 dark:text-brand-400 hover:underline">
@@ -860,22 +933,25 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
               {props.map(p => {
                 const equity = (p.currentValue ?? 0) - (p.mortgage?.enabled ? (p.mortgage?.balance ?? 0) : 0)
                 return (
-                  <div key={p.id} className="border border-gray-100 dark:border-gray-800 rounded-xl p-3 space-y-1.5 bg-white dark:bg-gray-800/50">
-                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{p.name}</p>
-                    <p className="text-[10px] text-gray-400 capitalize">{p.type?.replace('_', ' ')}</p>
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-gray-500">Value</span>
-                      <span className="font-semibold text-gray-900 dark:text-gray-100">${(p.currentValue ?? 0).toLocaleString()}</span>
-                    </div>
-                    {p.mortgage?.enabled && (p.mortgage?.balance ?? 0) > 0 && (
+                  <div key={p.id} className="border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden bg-white dark:bg-gray-800/50">
+                    <div className="h-1 bg-amber-400" />
+                    <div className="p-3 space-y-1.5">
+                      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 truncate">{p.name}</p>
+                      <p className="text-[10px] text-gray-400 capitalize">{p.type?.replace('_', ' ')}</p>
                       <div className="flex justify-between text-[11px]">
-                        <span className="text-gray-500">Mortgage</span>
-                        <span className="font-semibold text-rose-500">−${(p.mortgage.balance).toLocaleString()}</span>
+                        <span className="text-gray-500">Value</span>
+                        <span className="font-semibold text-gray-900 dark:text-gray-100">${(p.currentValue ?? 0).toLocaleString()}</span>
                       </div>
-                    )}
-                    <div className="flex justify-between text-[11px] pt-1 border-t border-gray-100 dark:border-gray-700">
-                      <span className="text-gray-500 font-medium">Equity</span>
-                      <span className={`font-bold ${equity >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>${equity.toLocaleString()}</span>
+                      {p.mortgage?.enabled && (p.mortgage?.balance ?? 0) > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span className="text-gray-500">Mortgage</span>
+                          <span className="font-semibold text-rose-500">−${(p.mortgage.balance).toLocaleString()}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-[11px] pt-1.5 mt-1 border-t border-gray-100 dark:border-gray-700">
+                        <span className="text-gray-500 font-medium">Equity</span>
+                        <span className={`font-bold ${equity >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'}`}>${equity.toLocaleString()}</span>
+                      </div>
                     </div>
                   </div>
                 )
