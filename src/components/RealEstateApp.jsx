@@ -562,7 +562,7 @@ function DCFModal({ property, onClose, onCommit }) {
       </div>
       <input type="range" min={min} max={max} step={step} value={inputs[k]}
         onChange={e => set(k, parseFloat(e.target.value))}
-        className="w-full h-1.5 rounded-full accent-brand-600 cursor-pointer" />
+        className="w-full" />
       {hint && <p className="text-[10px] text-gray-400 mt-0.5">{hint}</p>}
     </div>
   )
@@ -834,59 +834,82 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                     </div>
                   )}
 
-                  {/* Row 2: Appreciation + Market */}
-                  <div className="grid grid-cols-2 gap-2 items-end">
-                    <div>
-                      <label className="label">
-                        Annual Appreciation
-                        {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined && (
-                          <span className="ml-1 text-[10px] font-semibold text-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-1 py-0.5 rounded">DCF</span>
-                        )}
-                      </label>
+                  {/* Appreciation mode selector */}
+                  <div>
+                    <label className="label">Annual Appreciation</label>
+                    <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 mb-2">
+                      {[
+                        { id: 'manual', label: 'Manual' },
+                        { id: 'market', label: 'Market' },
+                        { id: 'dcf',    label: 'DCF Model' },
+                      ].map(m => (
+                        <button key={m.id}
+                          onClick={() => {
+                            upd('appreciationMode', m.id)
+                            if (m.id === 'market' && cityBench) upd('appreciation', cityBench.appreciation)
+                          }}
+                          className={`flex-1 px-2 py-1 text-[11px] font-medium rounded-md transition-all ${
+                            (property.appreciationMode ?? 'manual') === m.id
+                              ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                          }`}
+                        >{m.label}</button>
+                      ))}
+                    </div>
+
+                    {/* Manual mode */}
+                    {(property.appreciationMode ?? 'manual') === 'manual' && (
                       <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
-                    </div>
-                    <div>
-                      <label className="label">Market / City</label>
-                      <select value={property.city ?? ''} onChange={e => {
-                          const city = e.target.value
-                          upd('city', city)
-                          const bench = CITY_BENCHMARKS.find(c => c.city === city)
-                          if (bench && !property.appreciation) upd('appreciation', bench.appreciation)
-                        }}
-                        className="input-field text-xs py-1.5 w-full">
-                        <option value="">— Select —</option>
-                        {CITY_BENCHMARKS.map(c => (
-                          <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%)</option>
-                        ))}
-                      </select>
-                    </div>
+                    )}
+
+                    {/* Market mode */}
+                    {(property.appreciationMode ?? 'manual') === 'market' && (
+                      <div className="space-y-2">
+                        <select value={property.city ?? ''} onChange={e => {
+                            const city = e.target.value
+                            upd('city', city)
+                            const bench = CITY_BENCHMARKS.find(c => c.city === city)
+                            if (bench) upd('appreciation', bench.appreciation)
+                          }}
+                          className="input-field text-xs py-1.5 w-full">
+                          <option value="">— Select market —</option>
+                          {CITY_BENCHMARKS.map(c => (
+                            <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%/yr)</option>
+                          ))}
+                        </select>
+                        {cityBench && (
+                          <div className="flex justify-between text-[11px] bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2">
+                            <span className="text-blue-700 dark:text-blue-300 font-medium">Using historical avg</span>
+                            <span className="font-bold tabular-nums text-blue-700 dark:text-blue-300">{property.appreciation ?? 0}%/yr</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* DCF mode */}
+                    {(property.appreciationMode ?? 'manual') === 'dcf' && (
+                      <div className="space-y-2">
+                        {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined ? (
+                          <div className="flex justify-between text-[11px] bg-brand-50 dark:bg-brand-900/20 rounded-lg px-3 py-2">
+                            <span className="text-brand-700 dark:text-brand-300 font-medium">DCF implied appreciation</span>
+                            <span className="font-bold tabular-nums text-brand-700 dark:text-brand-300">{property.appreciation ?? 0}%/yr</span>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-gray-400 dark:text-gray-500">Run the DCF model to calculate implied appreciation.</p>
+                        )}
+                        {(property.currentValue ?? 0) > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowDCF(true)}
+                            className="w-full flex items-center justify-center gap-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 dark:hover:bg-brand-700 border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 transition-colors"
+                          >
+                            <span>📊</span>
+                            <span>{property.dcfInputs ? 'Re-run DCF Analysis' : 'Run DCF Analysis'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
-
-                  {/* Historical benchmark hint */}
-                  {cityBench && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-gray-400">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></span>
-                      {Math.abs((property.appreciation ?? 0) - cityBench.appreciation) > 0.05 && (
-                        <button onClick={() => upd('appreciation', cityBench.appreciation)}
-                          className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
-                          Apply {cityBench.appreciation}% →
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* DCF button */}
-                  {(property.currentValue ?? 0) > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setShowDCF(true)}
-                      className="w-full flex items-center justify-center gap-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 dark:hover:bg-brand-700 border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 transition-colors"
-                    >
-                      <span>📊</span>
-                      <span>DCF Analysis — model implied appreciation</span>
-                      {property.dcfInputs && <span className="ml-auto text-[10px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">saved</span>}
-                    </button>
-                  )}
                 </>
               )}
             </div>
