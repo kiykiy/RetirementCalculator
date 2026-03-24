@@ -873,10 +873,10 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                             const bench = CITY_BENCHMARKS.find(c => c.city === city)
                             onUpdate({ city, ...(bench ? { appreciation: bench.appreciation } : {}) })
                           }}
-                          className="input-field text-[11px] py-1 flex-1 min-w-0">
-                          <option value="">— Select —</option>
+                          className="input-field text-[11px] py-1 w-28 flex-shrink-0">
+                          <option value="">City…</option>
                           {CITY_BENCHMARKS.map(c => (
-                            <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%)</option>
+                            <option key={c.city} value={c.city}>{c.city.split(',')[0]}</option>
                           ))}
                         </select>
                       )}
