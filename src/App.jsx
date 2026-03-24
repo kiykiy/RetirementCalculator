@@ -2015,8 +2015,8 @@ export default function App() {
                 </svg>
               </button>
             </div>
-            {/* Scrollable input panel */}
-            <div className="flex-1 overflow-y-auto">
+            {/* Scrollable input panel — flex row so nav + inline submenu split properly */}
+            <div className="flex-1 flex overflow-hidden">
               <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} isMobile={true} />
             </div>
           </div>
