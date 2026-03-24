@@ -1559,28 +1559,31 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
         </div>
       </nav>
 
-      {/* ── Floating card (portal) ──────────────────────────────────────────────── */}
+      {/* ── Submenu panel (portal) ───────────────────────────────────────────────── */}
       {active && createPortal(
-        <div
-          className="overlay-panel"
-          style={{
-            position:  'fixed',
-            top:       cardPos.top,
-            left:      cardPos.left,
-            width:     NAV_ITEMS.find(i => i.key === active)?.cardWidth ?? 280,
-            maxHeight: cardPos.maxH,
-            zIndex:    40,
-          }}
-        >
-          <div className="card !p-3 shadow-xl">
-            {/* Card header */}
+        (() => {
+          const isMobile = window.innerWidth < 640
+          const label    = NAV_ITEMS.find(i => i.key === active)?.label
+
+          /* ── Shared header ── */
+          const header = (
             <div className="flex items-center justify-between mb-2">
-              {active !== 'cppoas' && (
-                <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">
-                  {NAV_ITEMS.find(i => i.key === active)?.label}
-                </p>
+              {isMobile ? (
+                /* Mobile: ← back button on the left */
+                <button
+                  onClick={() => setActive(null)}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Back
+                </button>
+              ) : (
+                active !== 'cppoas'
+                  ? <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">{label}</p>
+                  : <span />
               )}
-              {active === 'cppoas' && <span />}
               <div className="flex items-center gap-1">
                 {active === 'accounts' && (
                   <button
@@ -1589,24 +1592,89 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
                     title="Add account"
                   >+</button>
                 )}
-                <button
-                  onClick={() => setActive(null)}
-                  className="w-5 h-5 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
-                  title="Close"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                  </svg>
-                </button>
+                {!isMobile && (
+                  <button
+                    onClick={() => setActive(null)}
+                    className="w-5 h-5 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+                    title="Close"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </div>
-            {/* Card content — scrolls within its own maxHeight so card sizes to content naturally */}
-            <div className="overflow-y-auto sidebar-scroll space-y-2"
-              style={{ maxHeight: typeof cardPos.maxH === 'number' ? cardPos.maxH - 52 : 'calc(100vh - 132px)' }}>
-              {sectionContent[active]}
+          )
+
+          if (isMobile) {
+            /* ── Mobile: full-screen left-anchored drawer ── */
+            return (
+              <div
+                className="overlay-panel"
+                style={{ position: 'fixed', inset: 0, zIndex: 50 }}
+              >
+                {/* Backdrop */}
+                <div
+                  className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
+                  onClick={() => setActive(null)}
+                />
+                {/* Panel slides in from left */}
+                <div
+                  className="absolute top-0 left-0 h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col"
+                  style={{ width: 'min(88vw, 360px)' }}
+                >
+                  {/* Title bar */}
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
+                    <button
+                      onClick={() => setActive(null)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</p>
+                    {active === 'accounts' && (
+                      <button
+                        onClick={addAccount}
+                        className="ml-auto w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors text-sm font-medium"
+                        title="Add account"
+                      >+</button>
+                    )}
+                  </div>
+                  {/* Scrollable content */}
+                  <div className="flex-1 overflow-y-auto sidebar-scroll p-4 space-y-3">
+                    {sectionContent[active]}
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          /* ── Desktop: original floating card ── */
+          return (
+            <div
+              className="overlay-panel"
+              style={{
+                position:  'fixed',
+                top:       cardPos.top,
+                left:      cardPos.left,
+                width:     NAV_ITEMS.find(i => i.key === active)?.cardWidth ?? 280,
+                maxHeight: cardPos.maxH,
+                zIndex:    40,
+              }}
+            >
+              <div className="card !p-3 shadow-xl">
+                {header}
+                <div className="overflow-y-auto sidebar-scroll space-y-2"
+                  style={{ maxHeight: typeof cardPos.maxH === 'number' ? cardPos.maxH - 52 : 'calc(100vh - 132px)' }}>
+                  {sectionContent[active]}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>,
+          )
+        })(),
         document.body
       )}
     </>
