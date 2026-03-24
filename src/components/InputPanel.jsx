@@ -370,7 +370,7 @@ function AccountCard({ account, onUpdate, onRemove, tfsaLimit = null, tfsaIndexe
 
 const NAV_ITEMS = [
   { key: 'profile',    label: 'Profile'                          },
-  { key: 'accounts',   label: 'Accounts',  cardWidth: 622       },
+  { key: 'accounts',   label: 'Accounts',  cardWidth: 240       },
   { key: 'inflation',  label: 'Inflation'                        },
   { key: 'cpp',        label: 'CPP'                              },
   { key: 'oas',        label: 'OAS'                              },
@@ -409,7 +409,7 @@ function PersonToggle({ primaryName, spouseName, active, onChange }) {
 let nextCustomId    = 1
 let nextRetIncomeId = 1
 
-export default function InputPanel({ inputs, onChange }) {
+export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
   const [active, setActive] = useState(null)
   const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary' })
   const set      = (key) => (val) => onChange({ ...inputs, [key]: val })
@@ -574,6 +574,44 @@ export default function InputPanel({ inputs, onChange }) {
     ),
 
     accounts: (() => {
+      if (onOpenAccounts) {
+        // Summary view with link to Accounts app
+        const allAccounts = [
+          ...(inputs.accounts ?? []),
+          ...(inputs.spouse?.accounts ?? []),
+        ]
+        const totalBal = allAccounts.reduce((s, a) => s + (a.balance ?? 0), 0)
+        const fmt = v => v >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toLocaleString('en-CA')}`
+        return (
+          <div className="space-y-1.5">
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">
+              {allAccounts.length} account{allAccounts.length !== 1 ? 's' : ''}
+              {totalBal > 0 && <span className="ml-1 font-medium text-gray-700 dark:text-gray-300">· {fmt(totalBal)}</span>}
+            </span>
+            {allAccounts.length > 0 && (
+              <div className="space-y-0.5">
+                {allAccounts.slice(0, 5).map(a => (
+                  <div key={a.id} className="flex items-center justify-between">
+                    <span className="text-[11px] text-gray-600 dark:text-gray-400 truncate">{a.name || a.taxType}</span>
+                    <span className="text-[11px] font-medium text-gray-700 dark:text-gray-300 ml-2 tabular-nums">{fmt(a.balance ?? 0)}</span>
+                  </div>
+                ))}
+                {allAccounts.length > 5 && (
+                  <p className="text-[10px] text-gray-400">+{allAccounts.length - 5} more…</p>
+                )}
+              </div>
+            )}
+            <button
+              onClick={onOpenAccounts}
+              className="w-full text-xs text-brand-600 dark:text-brand-400 hover:text-brand-700 border border-brand-200 dark:border-brand-800 hover:border-brand-300 rounded-lg py-1 transition-colors font-medium mt-0.5"
+            >
+              → Open Accounts App
+            </button>
+          </div>
+        )
+      }
+
+      // Inline editor (fallback when no onOpenAccounts)
       const accWho = whoFor('accounts')
       const isSpouseAccounts = accWho === 'spouse'
       const accList   = isSpouseAccounts ? spouseAccounts : inputs.accounts
@@ -847,6 +885,17 @@ export default function InputPanel({ inputs, onChange }) {
       return (
         <div className="space-y-4">
           {spouseEnabled && <PersonToggle primaryName={primaryName} spouseName={spouseName} active={taxWho} onChange={setPerson('tax')} />}
+          <Field label="Annual Salary" id="annualSalary">
+            <NumberInput
+              id="annualSalary"
+              value={inputs.annualSalary ?? 0}
+              onChange={set('annualSalary')}
+              min={0} step={1000} prefix="$"
+            />
+          </Field>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 -mt-2">
+            Used to calculate your savings rate % on the Accumulation chart.
+          </p>
           <SliderField
             label="Marginal Rate (working)"
             value={taxVal.workingMarginalRate ?? 40}
@@ -974,16 +1023,16 @@ export default function InputPanel({ inputs, onChange }) {
             <button
               key={item.key}
               onClick={e => handleNavClick(item.key, e.currentTarget)}
-              className={`w-full text-left px-4 py-2.5 text-xs font-medium flex items-center justify-between transition-colors duration-150
+              className={`w-full text-left py-2.5 text-xs font-medium flex items-center justify-between transition-colors duration-150 border-l-2
                 ${active === item.key
-                  ? 'bg-gray-900 text-white dark:bg-gray-700 dark:text-white'
-                  : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200'
+                  ? 'pl-3.5 pr-4 bg-brand-50 text-brand-700 border-brand-500 dark:bg-brand-900/20 dark:text-brand-400 dark:border-brand-400'
+                  : 'pl-4 pr-4 text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200 border-transparent'
                 }`}
             >
               <span>{item.label}</span>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className={`w-3 h-3 flex-shrink-0 transition-all duration-150 ${active === item.key ? 'opacity-100' : 'opacity-0'}`}
+                className={`w-3 h-3 flex-shrink-0 transition-all duration-150 ${active === item.key ? 'opacity-100 text-brand-500' : 'opacity-0'}`}
                 viewBox="0 0 20 20" fill="currentColor"
               >
                 <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
@@ -1006,9 +1055,9 @@ export default function InputPanel({ inputs, onChange }) {
             zIndex:    40,
           }}
         >
-          <div className="card !p-3 shadow-xl flex flex-col" style={{ maxHeight: cardPos.maxH, overflow: 'hidden' }}>
+          <div className="card !p-3 shadow-xl">
             {/* Card header */}
-            <div className="flex items-center justify-between mb-2 flex-shrink-0">
+            <div className="flex items-center justify-between mb-2">
               {active !== 'cppoas' && (
                 <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">
                   {NAV_ITEMS.find(i => i.key === active)?.label}
@@ -1034,8 +1083,9 @@ export default function InputPanel({ inputs, onChange }) {
                 </button>
               </div>
             </div>
-            {/* Card content */}
-            <div className="overflow-y-auto sidebar-scroll space-y-2">
+            {/* Card content — scrolls within its own maxHeight so card sizes to content naturally */}
+            <div className="overflow-y-auto sidebar-scroll space-y-2"
+              style={{ maxHeight: typeof cardPos.maxH === 'number' ? cardPos.maxH - 52 : 'calc(100vh - 132px)' }}>
               {sectionContent[active]}
             </div>
           </div>

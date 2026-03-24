@@ -2117,7 +2117,7 @@ function BudgetSankey({ expenseSections, capex, totalNet,
                 style={{ transition: 'opacity 0.15s' }}
               />
               {/* Label above node */}
-              <text x={xMl + nodeW / 2} y={mn.y - 4} textAnchor="middle" fontSize={7.5}
+              <text x={xMl + nodeW / 2} y={mn.y - 4} textAnchor="middle" fontSize={9}
                 fill={mn.color} fontWeight={700}
                 opacity={activeId ? (activeId === mn.id ? 1 : 0.4) : 1}
                 style={{ transition: 'opacity 0.15s' }}>
@@ -2146,7 +2146,7 @@ function BudgetSankey({ expenseSections, capex, totalNet,
                 style={{ transition: 'opacity 0.15s' }}
               />
               <text x={xRl - 5} y={rn.y + rn.h / 2} textAnchor="end" dominantBaseline="middle"
-                fontSize={8} fill={tc}
+                fontSize={9} fill={tc}
                 opacity={activeId ? (activeId === rn.id ? 1 : 0.3) : 1}
                 style={{ transition: 'opacity 0.15s' }}>
                 {rn.label} · {fmtFull(rn.value)}
@@ -2201,10 +2201,11 @@ function BudgetSankey({ expenseSections, capex, totalNet,
       {/* ── Mid-column legend ── */}
       <div className="flex items-center gap-3 justify-center mt-2 flex-wrap">
         {MID_GROUPS.filter(g => midRaw.find(m => m.id === g.id)).map(g => (
-          <div key={g.id} className="flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-sm" style={{ background: g.color }} />
+          <div key={g.id} className="flex items-center gap-1.5">
+            <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ background: g.color }} />
             <span className="text-[9px] font-semibold text-gray-500 dark:text-gray-400">{g.label}</span>
-            <span className="text-[9px] text-gray-400 dark:text-gray-500">({g.desc})</span>
+            <span className="text-[9px] text-gray-400 dark:text-gray-500">·</span>
+            <span className="text-[9px] text-gray-400 dark:text-gray-500">{g.desc}</span>
           </div>
         ))}
       </div>
@@ -2577,7 +2578,7 @@ function DashboardTab({
         return (
           <div className="card !py-2.5">
             <div className="flex items-center gap-4 flex-wrap">
-              <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider flex-shrink-0">Income</span>
+              <span className="text-[9px] font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded-full flex-shrink-0">Income</span>
               {enabledInc.map(inc => {
                 const calc = calcIncomeNet(inc, province)
                 return (
@@ -2793,7 +2794,7 @@ function DashboardTab({
         return (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {tiles.map(t => (
-              <div key={t.label} className="card flex flex-col gap-1">
+              <div key={t.label} className={`rounded-2xl border border-gray-100 dark:border-gray-800 p-4 flex flex-col gap-1 ${t.bg}`} style={{boxShadow:'0 1px 3px 0 rgb(0 0 0/0.04),0 1px 2px -1px rgb(0 0 0/0.04)'}}>
                 <span className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
                   <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ background: t.dot }} />
                   {t.label}

@@ -304,7 +304,7 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
         <label className="label flex items-center gap-1">
           Balance
           {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
-          {hasSub && <span className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">(sum of splits)</span>}
+          {hasSub && <span className="text-[8px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full ml-0.5">auto</span>}
         </label>
         {hasSub
           ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${totalBal.toLocaleString()}</p>
