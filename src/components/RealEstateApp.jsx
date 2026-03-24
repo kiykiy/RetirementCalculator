@@ -834,10 +834,16 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                     </div>
                   )}
 
-                  {/* Appreciation: mode tabs + input on same row */}
+                  {/* Appreciation */}
                   <div>
-                    <label className="label">Annual Appreciation</label>
-                    <div className="flex items-center gap-1.5">
+                    {/* Title line with current rate */}
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="label !mb-0">Annual Appreciation</label>
+                      <span className="text-xs font-bold tabular-nums text-gray-700 dark:text-gray-300">{property.appreciation ?? 0}%/yr</span>
+                    </div>
+
+                    {/* Mode tabs row */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {/* Manual tab */}
                       <button
                         onClick={() => upd('appreciationMode', 'manual')}
@@ -848,7 +854,14 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                         }`}
                       >Manual</button>
 
-                      {/* Market tab + inline selector */}
+                      {/* Manual input slides in */}
+                      {(property.appreciationMode ?? 'manual') === 'manual' && (
+                        <div className="w-16 flex-shrink-0">
+                          <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
+                        </div>
+                      )}
+
+                      {/* Market tab */}
                       <button
                         onClick={() => {
                           if ((property.appreciationMode ?? 'manual') !== 'market') {
@@ -866,7 +879,7 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                         }`}
                       >Market</button>
 
-                      {/* Market selector slides in beside Market button */}
+                      {/* Market selector slides in beside Market */}
                       {(property.appreciationMode ?? 'manual') === 'market' && (
                         <select value={property.city ?? ''} onChange={e => {
                             const city = e.target.value
@@ -891,15 +904,15 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                         }`}
                       >DCF</button>
 
-                      {/* Narrow input — Manual mode */}
-                      {(property.appreciationMode ?? 'manual') === 'manual' && (
-                        <div className="w-16 flex-shrink-0">
-                          <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
-                        </div>
-                      )}
-                      {/* Inline value — Market & DCF modes */}
-                      {(property.appreciationMode ?? 'manual') !== 'manual' && (
-                        <span className="text-xs font-bold tabular-nums text-gray-700 dark:text-gray-300 flex-shrink-0">{property.appreciation ?? 0}%</span>
+                      {/* DCF run button slides in beside DCF tab */}
+                      {(property.appreciationMode ?? 'manual') === 'dcf' && (property.currentValue ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDCF(true)}
+                          className="px-3 py-1.5 text-[11px] font-semibold rounded-lg flex-shrink-0 flex items-center gap-1 border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-600 hover:text-white dark:hover:bg-brand-700 transition-colors"
+                        >
+                          📊 {property.dcfInputs ? 'Re-run' : 'Run DCF'}
+                        </button>
                       )}
                     </div>
 
@@ -908,25 +921,11 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                       <p className="text-[10px] text-gray-400 mt-1">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></p>
                     )}
 
-                    {/* DCF controls — shown below when DCF mode is active */}
+                    {/* DCF hint */}
                     {(property.appreciationMode ?? 'manual') === 'dcf' && (
-                      <div className="mt-2 space-y-2">
-                        {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined ? (
-                          <p className="text-[10px] text-brand-600 dark:text-brand-400 font-medium">DCF model implied rate applied</p>
-                        ) : (
-                          <p className="text-[10px] text-gray-400 dark:text-gray-500">Run the DCF model to calculate implied appreciation.</p>
-                        )}
-                        {(property.currentValue ?? 0) > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setShowDCF(true)}
-                            className="w-full flex items-center justify-center gap-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 dark:hover:bg-brand-700 border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 transition-colors"
-                          >
-                            <span>📊</span>
-                            <span>{property.dcfInputs ? 'Re-run DCF Analysis' : 'Run DCF Analysis'}</span>
-                          </button>
-                        )}
-                      </div>
+                      <p className="text-[10px] mt-1 {property.appreciationBeforeDcf != null ? 'text-brand-600 dark:text-brand-400 font-medium' : 'text-gray-400 dark:text-gray-500'}">
+                        {property.appreciationBeforeDcf != null ? 'DCF model implied rate applied' : 'Run the DCF model to calculate implied appreciation'}
+                      </p>
                     )}
                   </div>
                 </>
