@@ -239,7 +239,7 @@ function mergeInputs(saved) {
 const BUDGET_TABS = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'income',    label: 'Income'    },
-  { id: 'plan',      label: 'Plan'      },
+  { id: 'plan',      label: 'Budget'    },
   { id: 'capex',     label: 'Big Purchases' },
   { id: 'goals',     label: 'Goals'     },
 ]
