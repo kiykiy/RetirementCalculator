@@ -801,7 +801,7 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
             Property Details
           </button>
           {showDetails && (
-            <div className="space-y-2.5">
+            <div className="space-y-3">
               {readOnly ? (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
                   {property.purchaseDate && <><span className="text-gray-400">Purchased</span><span className="font-medium text-gray-700 dark:text-gray-300">{property.purchaseDate}</span></>}
@@ -810,7 +810,8 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                 </div>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
+                  {/* Row 1: Purchase info */}
+                  <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="label">Purchase Date</label>
                       <input type="date" value={property.purchaseDate ?? ''} onChange={e => upd('purchaseDate', e.target.value)}
@@ -820,12 +821,21 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                       <label className="label">Purchase Price</label>
                       <NumInput value={property.purchasePrice ?? 0} onChange={v => upd('purchasePrice', v)} prefix="$" step={10000} />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="label">Current Value</label>
                       <NumInput value={property.currentValue ?? 0} onChange={v => upd('currentValue', v)} prefix="$" step={5000} />
                     </div>
+                  </div>
+
+                  {/* Gain/loss badge inline */}
+                  {gain !== 0 && (
+                    <div className={`text-[10px] px-2.5 py-1.5 rounded-lg ${gain >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400'}`}>
+                      {gain >= 0 ? '↑ +' : '↓ −'}${Math.abs(Math.round(gain)).toLocaleString()} ({gainPct >= 0 ? '+' : ''}{gainPct.toFixed(1)}%) since purchase
+                    </div>
+                  )}
+
+                  {/* Row 2: Appreciation + Market */}
+                  <div className="grid grid-cols-2 gap-2 items-end">
                     <div>
                       <label className="label">
                         Annual Appreciation
@@ -835,35 +845,35 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                       </label>
                       <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
                     </div>
+                    <div>
+                      <label className="label">Market / City</label>
+                      <select value={property.city ?? ''} onChange={e => {
+                          const city = e.target.value
+                          upd('city', city)
+                          const bench = CITY_BENCHMARKS.find(c => c.city === city)
+                          if (bench && !property.appreciation) upd('appreciation', bench.appreciation)
+                        }}
+                        className="input-field text-xs py-1.5 w-full">
+                        <option value="">— Select —</option>
+                        {CITY_BENCHMARKS.map(c => (
+                          <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%)</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  {/* City / Market picker */}
-                  <div>
-                    <label className="label">Market / City (for DCF benchmarks)</label>
-                    <select value={property.city ?? ''} onChange={e => {
-                        const city = e.target.value
-                        upd('city', city)
-                        const bench = CITY_BENCHMARKS.find(c => c.city === city)
-                        if (bench && !property.appreciation) upd('appreciation', bench.appreciation)
-                      }}
-                      className="input-field text-xs py-1 w-full">
-                      <option value="">— Select a market —</option>
-                      {CITY_BENCHMARKS.map(c => (
-                        <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%/yr hist.)</option>
-                      ))}
-                    </select>
-                    {cityBench && (
-                      <div className="mt-1.5 flex items-center gap-2">
-                        <span className="text-[10px] text-gray-400">Historical: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></span>
-                        {Math.abs((property.appreciation ?? 0) - cityBench.appreciation) > 0.05 && (
-                          <button onClick={() => upd('appreciation', cityBench.appreciation)}
-                            className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
-                            Apply {cityBench.appreciation}% →
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  {/* Historical benchmark hint */}
+                  {cityBench && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-400">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></span>
+                      {Math.abs((property.appreciation ?? 0) - cityBench.appreciation) > 0.05 && (
+                        <button onClick={() => upd('appreciation', cityBench.appreciation)}
+                          className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+                          Apply {cityBench.appreciation}% →
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* DCF button */}
                   {(property.currentValue ?? 0) > 0 && (
@@ -874,15 +884,10 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                     >
                       <span>📊</span>
                       <span>DCF Analysis — model implied appreciation</span>
-                      {property.dcfInputs && <span className="ml-auto text-[10px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">Last run saved</span>}
+                      {property.dcfInputs && <span className="ml-auto text-[10px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">saved</span>}
                     </button>
                   )}
                 </>
-              )}
-              {gain !== 0 && (
-                <div className={`text-[10px] px-2.5 py-1.5 rounded-lg ${gain >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300' : 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400'}`}>
-                  {gain >= 0 ? '↑ +' : '↓ −'}${Math.abs(Math.round(gain)).toLocaleString()} ({gainPct >= 0 ? '+' : ''}{gainPct.toFixed(1)}%) since purchase
-                </div>
               )}
             </div>
           )}
