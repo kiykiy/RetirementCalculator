@@ -30,7 +30,6 @@ import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
 import ScenarioCompare from './components/ScenarioCompare.jsx'
 import OnboardingWizard from './components/OnboardingWizard.jsx'
-import PDFExportButton  from './components/PDFExport.jsx'
 import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
 
 const DEFAULT_INPUTS = {
@@ -1306,10 +1305,6 @@ export default function App() {
                 </button>
               )}
 
-              {/* PDF Export */}
-              {activeApp === 'retirement' && (
-                <PDFExportButton inputs={inputs} result={allResults?.primary ?? null} darkMode={darkMode} />
-              )}
 
               {/* Snapshots */}
               {activeApp === 'retirement' && (
