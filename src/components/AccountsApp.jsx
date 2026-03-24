@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { calcTfsaLimit, getMixStats, ASSET_CLASSES } from '../lib/simulate.js'
 import { classifyPlaidAccount, debtTypeFromPlaid } from './PlaidConnect.jsx'
 
@@ -7,6 +7,8 @@ import { classifyPlaidAccount, debtTypeFromPlaid } from './PlaidConnect.jsx'
 function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, className = '' }) {
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+  useEffect(() => () => clearTimeout(timerRef.current), [])
   const fmt = v => (typeof v === 'number' && !isNaN(v)) ? v.toLocaleString('en-CA') : '0'
 
   return (
@@ -17,8 +19,8 @@ function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, class
         inputMode="numeric"
         value={focused ? local : fmt(value)}
         onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
-        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g, '')); if (!isNaN(n)) onChange(n) }}
-        onBlur={() => { setFocused(false); const n = parseFloat(local.replace(/,/g, '')); if (!isNaN(n)) onChange(Math.max(min, n)) }}
+        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g, '')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g, '')); if (!isNaN(n)) onChange(Math.max(min, n)) }}
         className={`input-field text-xs py-1.5 ${prefix ? 'pl-6' : ''} ${suffix ? 'pr-8' : ''} ${className}`}
       />
       {suffix && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
@@ -29,6 +31,8 @@ function NumInput({ value, onChange, prefix, suffix, min = 0, step = 1000, class
 function PctInput({ value, onChange, min = 0, max = 30 }) {
   const [local, setLocal] = useState('')
   const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+  useEffect(() => () => clearTimeout(timerRef.current), [])
   return (
     <div className="relative flex items-center">
       <input
@@ -36,8 +40,8 @@ function PctInput({ value, onChange, min = 0, max = 30 }) {
         inputMode="decimal"
         value={focused ? local : String(value ?? 0)}
         onFocus={() => { setFocused(true); setLocal(String(value ?? 0)) }}
-        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value); if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n))) }}
-        onBlur={() => { setFocused(false); const n = parseFloat(local); onChange(!isNaN(n) ? Math.min(max, Math.max(min, n)) : value) }}
+        onChange={e => { setLocal(e.target.value); const n = parseFloat(e.target.value); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(Math.min(max, Math.max(min, n))), 250) } }}
+        onBlur={() => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local); onChange(!isNaN(n) ? Math.min(max, Math.max(min, n)) : value) }}
         className="input-field text-xs py-1.5 pr-7 no-spinner"
       />
       <span className="absolute right-2.5 text-gray-400 text-xs select-none">%</span>

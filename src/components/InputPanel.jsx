@@ -26,7 +26,9 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
 
   const [local, setLocal] = useState(fmt(value))
   const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
   useEffect(() => { if (!focused) setLocal(fmt(value)) }, [value])
+  useEffect(() => () => clearTimeout(timerRef.current), [])
 
   function handleFocus() {
     setFocused(true)
@@ -37,9 +39,13 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
     const raw = e.target.value
     setLocal(raw)
     const n = parseFloat(raw.replace(/,/g, ''))
-    if (!isNaN(n)) onChange(n)
+    if (!isNaN(n)) {
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => onChange(n), 250)
+    }
   }
   function handleBlur() {
+    clearTimeout(timerRef.current)
     setFocused(false)
     const n = parseFloat(local.replace(/,/g, ''))
     if (isNaN(n)) { setLocal(fmt(value)) }

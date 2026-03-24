@@ -1,4 +1,4 @@
-import { useState, Fragment, useMemo, useRef } from 'react'
+import { useState, Fragment, useMemo, useRef, useEffect } from 'react'
 import ExpenseTracker from './ExpenseTracker.jsx'
 import { buildDemoTransactions } from './ExpenseTracker.jsx'
 import { createPortal } from 'react-dom'
@@ -248,9 +248,11 @@ function Toggle({ value, onChange }) {
 function MoneyInput({ value, onChange, className = '', placeholder = '' }) {
   const [local, setLocal]   = useState('')
   const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+  useEffect(() => () => clearTimeout(timerRef.current), [])
   const onFocus  = () => { setFocused(true); setLocal(String(value ?? '')) }
-  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) onChange(n) }
-  const onBlur   = () => { setFocused(false); const n = parseFloat(local.replace(/,/g,'')); if (!isNaN(n)) { onChange(Math.round(n)); setLocal(Math.round(n).toLocaleString()) } else setLocal((value??0).toLocaleString()) }
+  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
+  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g,'')); if (!isNaN(n)) { onChange(Math.round(n)); setLocal(Math.round(n).toLocaleString()) } else setLocal((value??0).toLocaleString()) }
   return (
     <div className={`relative flex items-center ${className}`}>
       <span className="absolute left-2.5 text-gray-400 text-xs pointer-events-none">$</span>
@@ -265,9 +267,11 @@ function MoneyInput({ value, onChange, className = '', placeholder = '' }) {
 function CellInput({ value, onChange }) {
   const [local, setLocal]   = useState('')
   const [focused, setFocused] = useState(false)
+  const timerRef = useRef(null)
+  useEffect(() => () => clearTimeout(timerRef.current), [])
   const onFocus  = () => { setFocused(true); setLocal(value === 0 ? '' : String(value)) }
-  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) onChange(n) }
-  const onBlur   = () => { setFocused(false); const n = parseFloat(local.replace(/,/g,'')); onChange(isNaN(n) ? 0 : Math.round(n)) }
+  const onChg    = e => { setLocal(e.target.value); const n = parseFloat(e.target.value.replace(/,/g,'')); if (!isNaN(n)) { clearTimeout(timerRef.current); timerRef.current = setTimeout(() => onChange(n), 250) } }
+  const onBlur   = () => { clearTimeout(timerRef.current); setFocused(false); const n = parseFloat(local.replace(/,/g,'')); onChange(isNaN(n) ? 0 : Math.round(n)) }
   return (
     <input type="text" inputMode="numeric" placeholder="0"
       value={focused ? local : (value === 0 ? '' : value.toLocaleString())}
