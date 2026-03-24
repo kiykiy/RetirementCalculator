@@ -158,8 +158,8 @@ function AccountTooltip({ row, type }) {
       <span className="cursor-default">{displayValue}</span>
       {show && activeLines.length > 0 && (
         <div
-          className="pointer-events-none fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg p-3 text-xs space-y-0.5"
-          style={{ left: tipLeft, top: tipTop, width: TIP_W, transform: 'translateY(-100%)' }}
+          className="pointer-events-none fixed z-[9999] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg p-3 text-xs space-y-0.5 overflow-hidden"
+          style={{ left: tipLeft, top: tipTop, width: TIP_W, maxWidth: TIP_W, transform: 'translateY(-100%)' }}
         >
           <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1.5">
             {type === 'portfolio' ? 'Portfolio' : type === 'rrif' ? 'RRIF' : type === 'tfsa' ? 'TFSA' : type === 'grossWD' ? 'Gross Withdrawal' : type === 'grossIncome' ? 'Gross Income' : 'Non-Reg'} — Age {row.age}
@@ -176,8 +176,8 @@ function AccountTooltip({ row, type }) {
           {/* Explanatory notes for grossWD / grossIncome */}
           {(type === 'grossWD' || type === 'grossIncome') && (lines._note || lines._excluded) && (
             <div className="pt-1.5 mt-1 border-t border-gray-100 dark:border-gray-700 space-y-0.5">
-              {lines._note && <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed">{lines._note}</p>}
-              {lines._excluded && <p className="text-[10px] text-amber-500 dark:text-amber-400 leading-relaxed">{lines._excluded}</p>}
+              {lines._note && <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed whitespace-normal break-words">{lines._note}</p>}
+              {lines._excluded && <p className="text-[10px] text-amber-500 dark:text-amber-400 leading-relaxed whitespace-normal break-words">{lines._excluded}</p>}
             </div>
           )}
           {type === 'tfsa' && (row.tfsaAnnualLimit ?? 0) > 0 && (
