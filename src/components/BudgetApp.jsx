@@ -2281,6 +2281,8 @@ function DashboardTab({
   const now = new Date()
   const [selPeriod, setSelPeriod] = useState({ type: 'quarter', q: 1 })
   const [chartYear, setChartYear] = useState(() => planYear)
+  const [cfOffset, setCfOffset]   = useState(0) // month offset for draggable charts
+  const cfDragRef = useRef({ dragging: false, startX: 0, startOffset: 0 })
 
   // When dashDemo is on, include generated demo transactions
   const demoTxns = useMemo(() => dashDemo
@@ -2434,6 +2436,40 @@ function DashboardTab({
   const chartExpByMonth = Array(12).fill(0).map((_, mi) =>
     expenseSections.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item, chartYear)[mi] ?? 0), 0)
   )
+  // ── Draggable 12-month window ────────────────────────────────────────────────
+  // Build array of 12 {year, month (0-11), label} slots ending at now + offset
+  const cfWindow = useMemo(() => {
+    const endMs = new Date(now.getFullYear(), now.getMonth() + cfOffset, 1)
+    return Array.from({ length: 12 }, (_, i) => {
+      const d = new Date(endMs.getFullYear(), endMs.getMonth() - 11 + i, 1)
+      return { year: d.getFullYear(), month: d.getMonth(), label: MONTHS[d.getMonth()].slice(0, 3) + ' ' + String(d.getFullYear()).slice(2) }
+    })
+  }, [cfOffset, now.getFullYear(), now.getMonth()])
+
+  // Planned data for the window
+  const plannedWindowData = useMemo(() => cfWindow.map(({ year, month, label }) => {
+    const planExp = expenseSections.flatMap(s => s.items)
+      .reduce((s, item) => s + (itemMonthsAgg(item, year)[month] ?? 0), 0)
+    const inc = totalNet
+    const exp = -(planExp + totalCapexMo)
+    return { label, income: inc, expense: exp, net: inc + exp }
+  }), [cfWindow, expenseSections, totalNet, totalCapexMo])
+
+  // Actual data for the window (from transactions)
+  const actualWindowData = useMemo(() => cfWindow.map(({ year, month, label }) => {
+    const monthTxns = effectiveTxns.filter(t => {
+      if (!t.date) return false
+      const d = new Date(t.date + 'T00:00:00')
+      return d.getFullYear() === year && d.getMonth() === month
+    })
+    const income  = monthTxns.filter(t => (t.amount ?? 0) > 0).reduce((s, t) => s + (t.amount ?? 0), 0)
+    const expense = monthTxns.filter(t => (t.amount ?? 0) < 0).reduce((s, t) => s + (t.amount ?? 0), 0)
+    const net = income + expense
+    return { label, income: income || null, expense: expense || null, net: (income || expense) ? net : null }
+  }), [cfWindow, effectiveTxns])
+
+  const hasActualData = actualWindowData.some(d => d.income !== null || d.expense !== null)
+
   const cashflowChartData = MONTHS.map((m, mi) => {
     const inc = totalNet
     const exp = -(chartExpByMonth[mi] + totalCapexMo)
@@ -2852,60 +2888,105 @@ function DashboardTab({
         )
       })()}
 
-      {/* ── 4. CASH FLOW CHART ── */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow</h3>
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">Planned</span>
-          </div>
+      {/* ── 4. CASH FLOW CHARTS (Planned + Actual side by side) ── */}
+      {(() => {
+        // Shared drag handlers — dragging either chart moves both
+        const onPointerDown = e => {
+          cfDragRef.current = { dragging: true, startX: e.clientX, startOffset: cfOffset }
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }
+        const onPointerMove = e => {
+          if (!cfDragRef.current.dragging) return
+          const delta = Math.round((cfDragRef.current.startX - e.clientX) / 40)
+          const next = Math.max(-24, Math.min(12, cfDragRef.current.startOffset + delta))
+          if (next !== cfOffset) setCfOffset(next)
+        }
+        const onPointerUp = () => { cfDragRef.current.dragging = false }
+
+        const legend = (
           <div className="flex items-center gap-3">
-            {/* Year navigator */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setChartYear(y => y - 1)}
-                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-[11px]"
-              >‹</button>
-              <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300 w-10 text-center tabular-nums">{chartYear}</span>
-              <button
-                onClick={() => setChartYear(y => y + 1)}
-                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-[11px]"
-              >›</button>
-            </div>
-            {/* Legend */}
-            <div className="flex items-center gap-3">
-              {[['#10b981', 'Income'], ['#ef4444', 'Expenses'], ['#6366f1', 'Net']].map(([color, label]) => (
-                <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
-                  {label === 'Net'
-                    ? <span className="inline-block w-3 h-0.5 rounded" style={{ background: color }} />
-                    : <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
-                  }
-                  {label}
-                </span>
-              ))}
-            </div>
+            {[['#10b981', 'Income'], ['#ef4444', 'Expenses'], ['#6366f1', 'Net']].map(([color, label]) => (
+              <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
+                {label === 'Net'
+                  ? <span className="inline-block w-3 h-0.5 rounded" style={{ background: color }} />
+                  : <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />}
+                {label}
+              </span>
+            ))}
           </div>
-        </div>
-        <ResponsiveContainer width="100%" height={180}>
-          <ComposedChart data={cashflowChartData} barSize={24} barGap={-24} margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
-            <XAxis dataKey="month" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={v => yFmt(Math.abs(v))} width={46} />
-            <ReTooltip
-              contentStyle={tooltipStyle}
-              formatter={(value, name) => {
-                const labels = { income: 'Income', expense: 'Expenses', net: 'Net' }
-                const prefix = name === 'net' ? (value >= 0 ? '+' : '') : ''
-                return [`${prefix}$${fmtNum(Math.round(Math.abs(value)))}`, labels[name] ?? name]
-              }}
-            />
-            <ReferenceLine y={0} stroke={darkMode ? '#4b5563' : '#d1d5db'} strokeWidth={1.5} />
-            <Bar dataKey="income" name="income" radius={[3, 3, 0, 0]} fill="#10b981" fillOpacity={0.85} />
-            <Bar dataKey="expense" name="expense" radius={[0, 0, 3, 3]} fill="#ef4444" fillOpacity={0.85} />
-            <Line dataKey="net" name="net" type="monotone" stroke="#6366f1" strokeWidth={2} dot={{ r: 2.5, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 4, strokeWidth: 0 }} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+        )
+
+        const dragHint = (
+          <span className="text-[10px] text-gray-300 dark:text-gray-600 select-none">⟵ drag ⟶</span>
+        )
+
+        const rangeLabel = cfWindow.length > 0
+          ? `${cfWindow[0].label} – ${cfWindow[cfWindow.length - 1].label}`
+          : ''
+
+        const makeChart = (data, label, badge, badgeClass, emptyMsg) => (
+          <div className="card flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1 gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow</h3>
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${badgeClass}`}>{badge}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                {dragHint}
+                {legend}
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-1 tabular-nums">{rangeLabel}</p>
+            {emptyMsg ? (
+              <div className="h-[160px] flex items-center justify-center">
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center px-4">{emptyMsg}</p>
+              </div>
+            ) : (
+              <div
+                className="cursor-grab active:cursor-grabbing select-none touch-pan-y"
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={onPointerUp}
+              >
+                <ResponsiveContainer width="100%" height={160}>
+                  <ComposedChart data={data} barSize={18} barGap={-18} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
+                    <XAxis dataKey="label" tick={{ fontSize: 8, fill: axisColor }} axisLine={false} tickLine={false} interval={1} />
+                    <YAxis tick={{ fontSize: 8, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={v => yFmt(Math.abs(v))} width={40} />
+                    <ReTooltip contentStyle={tooltipStyle} formatter={(value, name) => {
+                      const labels = { income: 'Income', expense: 'Expenses', net: 'Net' }
+                      const prefix = name === 'net' ? (value >= 0 ? '+' : '') : ''
+                      return [`${prefix}$${fmtNum(Math.round(Math.abs(value ?? 0)))}`, labels[name] ?? name]
+                    }} />
+                    <ReferenceLine y={0} stroke={darkMode ? '#4b5563' : '#d1d5db'} strokeWidth={1.5} />
+                    <Bar dataKey="income" name="income" radius={[3, 3, 0, 0]} fill="#10b981" fillOpacity={0.85} />
+                    <Bar dataKey="expense" name="expense" radius={[0, 0, 3, 3]} fill="#ef4444" fillOpacity={0.85} />
+                    <Line dataKey="net" name="net" type="monotone" stroke="#6366f1" strokeWidth={2} dot={{ r: 2, fill: '#6366f1', strokeWidth: 0 }} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        )
+
+        return (
+          <div className="flex gap-3 flex-col sm:flex-row">
+            {makeChart(
+              plannedWindowData,
+              'Planned', 'Planned',
+              'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400',
+              null
+            )}
+            {makeChart(
+              actualWindowData,
+              'Actual', 'Actual',
+              'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400',
+              hasActualData ? null : 'No transaction data yet. Add transactions in the Spend module to see actuals.'
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── 6. RECENT TRANSACTIONS ── */}
       {recentTxns.length > 0 && (
