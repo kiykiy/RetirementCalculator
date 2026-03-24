@@ -300,28 +300,29 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
         <button onClick={onRemove} className="text-gray-300 hover:text-red-500 text-sm leading-none px-1 dark:text-gray-600" title="Remove">✕</button>
       </div>
 
-      {!hasSub && (
-        <div>
-          <label className="label flex items-center gap-1">
-            Balance
-            {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
-          </label>
-          {demoMode
+      <div>
+        <label className="label flex items-center gap-1">
+          Balance
+          {demoMode && <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+          {hasSub && <span className="text-[9px] text-gray-400 dark:text-gray-500 font-normal">(sum of splits)</span>}
+        </label>
+        {hasSub
+          ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${totalBal.toLocaleString()}</p>
+          : demoMode
             ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
             : <NumInput value={acc.balance ?? 0} onChange={v => onUpdate('balance', v)} prefix="$" step={500} />
-          }
-        </div>
-      )}
+        }
+      </div>
 
       <div>
         <label className="label">{rateLabel}</label>
         <PctInput value={acc.rate ?? defaultRate} onChange={v => onUpdate('rate', v)} max={30} />
       </div>
 
-      {/* Sub-accounts */}
+      {/* Internal Splits */}
       {hasSub && (
         <div className="space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Sub-accounts</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Internal Split</p>
           {acc.subAccounts.map(sa => (
             <div key={sa.id} className="flex items-center gap-1.5">
               <input type="text" value={sa.name} onChange={e => onUpdateSub(sa.id, 'name', e.target.value)}
@@ -335,15 +336,12 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
               <button onClick={() => onRemoveSub(sa.id)} className="text-gray-300 hover:text-red-500 text-sm leading-none dark:text-gray-600">✕</button>
             </div>
           ))}
-          <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-300 tabular-nums">
-            Total: ${totalBal.toLocaleString()}
-          </p>
         </div>
       )}
 
       <button onClick={() => onAddSub(acc.id)}
         className="w-full text-[10px] text-gray-400 hover:text-brand-600 border border-dashed border-gray-200 dark:border-gray-700 rounded-lg py-1 transition-colors">
-        + Sub-account
+        + Add Split
       </button>
 
       <PlaidAccountBadge acc={acc} onUpdate={(f, v) => onUpdate(f, v)} demoMode={demoMode} demoBankIdx={demoBankIdx} />
