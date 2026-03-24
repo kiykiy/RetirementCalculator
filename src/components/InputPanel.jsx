@@ -453,8 +453,16 @@ function PersonToggle({ primaryName, spouseName, active, onChange }) {
 let nextCustomId    = 1
 let nextRetIncomeId = 1
 
-export default function InputPanel({ inputs, onChange, onOpenAccounts, reProperties = [], simRows = [], isMobile = false }) {
+export default function InputPanel({ inputs, onChange, onOpenAccounts, reProperties = [], simRows = [], isMobile = false, openSection = null, setOpenSection }) {
   const [active, setActive] = useState(null)
+
+  // React to openSection from AssumptionsPills
+  useEffect(() => {
+    if (openSection) {
+      setActive(openSection)
+      if (setOpenSection) setOpenSection(null)
+    }
+  }, [openSection])
   const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary', meltdown: 'primary' })
   // HELOC tool local state
   const [helocRate,     setHelocRate]     = useState(7.2)

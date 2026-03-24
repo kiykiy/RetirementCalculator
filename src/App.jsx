@@ -30,6 +30,7 @@ import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
 import ScenarioCompare from './components/ScenarioCompare.jsx'
 import OnboardingWizard from './components/OnboardingWizard.jsx'
+import AssumptionsPills from './components/AssumptionsPills.jsx'
 import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
 
 const DEFAULT_INPUTS = {
@@ -407,6 +408,7 @@ export default function App() {
     return () => window.removeEventListener('resize', handler)
   }, [])
   const [onboardingOpen,       setOnboardingOpen]       = useState(() => !_saved?.inputs?.userName)
+  const [openSection,          setOpenSection]          = useState(null)
   const [sideNavOpen,          setSideNavOpen]          = useState(false)
   const [scenarioOverlay,      setScenarioOverlay]      = useState(false)
   const [scenarioLockRetirement, setScenarioLockRetirement] = useState(false)
@@ -1598,7 +1600,7 @@ export default function App() {
 
             {/* ── Inputs sidebar ── */}
             <aside className="shrink-0 hidden lg:flex overflow-y-auto">
-              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => setActiveApp('accounts')} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => setActiveApp('accounts')} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} openSection={openSection} setOpenSection={setOpenSection} />
             </aside>
 
             {/* ── Main content ── */}
@@ -1928,6 +1930,21 @@ export default function App() {
             </div>
           )}
 
+          {/* Assumptions pills */}
+          {result && activeApp === 'retirement' && (
+            <AssumptionsPills
+              inputs={inputs}
+              onOpenSection={(section) => {
+                if (isMobileScreen) {
+                  setOpenSection(section)
+                  setMobileInputsOpen(true)
+                } else {
+                  setOpenSection(section)
+                }
+              }}
+            />
+          )}
+
           {/* Accumulation Portfolio chart */}
           {result && activeTab === 'accChart' && (
             <div className="space-y-5">
@@ -2098,7 +2115,7 @@ export default function App() {
             </div>
             {/* Scrollable input panel — flex row so nav + inline submenu split properly */}
             <div className="flex-1 flex overflow-hidden">
-              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} isMobile={true} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} isMobile={true} openSection={openSection} setOpenSection={setOpenSection} />
             </div>
           </div>
         </div>
