@@ -36,7 +36,7 @@ function ContribTooltip({ row, accounts }) {
 
   return (
     <div className="relative inline-block" onMouseEnter={enter} onMouseLeave={leave}>
-      <span className="cursor-default">{fmt(row.contribution)}</span>
+      <span className="cursor-default text-brand-700 dark:text-brand-400">{fmt(row.contribution)}</span>
       {show && (
         <div
           className="absolute left-0 bottom-full mb-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg p-3 w-60 text-xs space-y-0.5"
