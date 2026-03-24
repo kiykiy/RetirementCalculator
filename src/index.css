@@ -2,61 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Portrait-mode rotate overlay — phones only */
-#rotate-overlay {
-  display: none;
-}
-
-@media screen and (max-width: 767px) and (orientation: portrait) {
-  #rotate-overlay {
-    display: block;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    background: #111827;
-    color: #f9fafb;
-    text-align: center;
-    font-family: 'Inter', system-ui, sans-serif;
-  }
-  #rotate-overlay-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    padding: 2rem;
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-  }
-  #rotate-overlay-inner svg {
-    width: 72px;
-    height: 72px;
-    color: #6b7280;
-    animation: rotate-hint 2.4s ease-in-out infinite;
-  }
-  #rotate-overlay-inner .rotate-title {
-    font-size: 1.25rem;
-    font-weight: 600;
-  }
-  #rotate-overlay-inner .rotate-sub {
-    font-size: 0.875rem;
-    color: #6b7280;
-  }
-}
-
 @keyframes overlayFadeIn {
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes rotate-hint {
-  0%, 100% { transform: rotate(0deg); }
-  35%       { transform: rotate(90deg); }
-  65%       { transform: rotate(90deg); }
 }
 
 @layer base {
