@@ -1196,7 +1196,7 @@ export default function App() {
                 ) : activeApp === 'tracking' ? (
                   <>
                     <h1 className="text-sm font-semibold text-gray-900 dark:text-gray-50 tracking-tight leading-none">Transactions</h1>
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Track Your Spending</p>
+                    <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-0.5">Optional · Connect your bank to track actual spending — or skip and use the Budget module for planning</p>
                   </>
                 ) : activeApp === 'accounts' ? (
                   <>
