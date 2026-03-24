@@ -319,23 +319,24 @@ function BudgetAccountCard({ acc, rateLabel, defaultRate, onUpdate, onRemove, on
         <button onClick={onRemove} className="text-gray-300 hover:text-red-500 text-sm leading-none px-1 dark:text-gray-600" title="Remove">✕</button>
       </div>
 
-      <div>
-        <label className="label flex items-center gap-1">
-          Balance
-          {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
-          {hasSub && <span className="text-[8px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full ml-0.5">auto</span>}
-        </label>
-        {hasSub
-          ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${totalBal.toLocaleString()}</p>
-          : demoMode
-            ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
-            : <NumInput value={acc.balance ?? 0} onChange={v => onUpdate('balance', v)} prefix="$" step={500} />
-        }
-      </div>
-
-      <div>
-        <label className="label">{rateLabel}</label>
-        <PctInput value={acc.rate ?? defaultRate} onChange={v => onUpdate('rate', v)} max={30} />
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="label flex items-center gap-1">
+            Balance
+            {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+            {hasSub && <span className="text-[8px] font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-full ml-0.5">auto</span>}
+          </label>
+          {hasSub
+            ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${totalBal.toLocaleString()}</p>
+            : demoMode
+              ? <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
+              : <NumInput value={acc.balance ?? 0} onChange={v => onUpdate('balance', v)} prefix="$" step={500} />
+          }
+        </div>
+        <div>
+          <label className="label">{rateLabel}</label>
+          <PctInput value={acc.rate ?? defaultRate} onChange={v => onUpdate('rate', v)} max={30} />
+        </div>
       </div>
 
       {/* Buckets */}
@@ -454,25 +455,25 @@ function DebtAccountCard({ acc, onUpdate, onRemove, demoMode = false, demoBankId
         {DEBT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
       </select>
 
-      {/* Balance owing */}
-      <div>
-        <label className="label flex items-center gap-1">
-          Balance Owing
-          {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
-        </label>
-        {demoMode
-          ? <p className="text-sm font-semibold text-rose-600 dark:text-rose-400 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
-          : <NumInput value={acc.balance ?? 0} onChange={v => upd('balance', v)} prefix="$" step={100} />
-        }
+      {/* Balance + Interest side by side */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="label flex items-center gap-1">
+            Balance
+            {demoMode && <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">● Plaid</span>}
+          </label>
+          {demoMode
+            ? <p className="text-sm font-semibold text-rose-600 dark:text-rose-400 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${demoBal.toLocaleString()}</p>
+            : <NumInput value={acc.balance ?? 0} onChange={v => upd('balance', v)} prefix="$" step={100} />
+          }
+        </div>
+        <div>
+          <label className="label">APR</label>
+          <PctInput value={acc.rate ?? DEBT_DEFAULT_RATES[acc.debtType ?? 'credit_card']} onChange={v => upd('rate', v)} max={50} />
+        </div>
       </div>
 
-      {/* Interest rate */}
-      <div>
-        <label className="label">Interest Rate (APR)</label>
-        <PctInput value={acc.rate ?? DEBT_DEFAULT_RATES[acc.debtType ?? 'credit_card']} onChange={v => upd('rate', v)} max={50} />
-      </div>
-
-      {/* Monthly minimum payment */}
+      {/* Min payment */}
       <div>
         <label className="label">Min. Monthly Payment</label>
         <NumInput value={acc.minPayment ?? 0} onChange={v => upd('minPayment', v)} prefix="$" step={25} />
@@ -694,7 +695,7 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
-    <div className="p-6 space-y-8">
+    <div className="p-6 space-y-6">
 
       {/* ── Demo Mode Banner ── */}
       {demoMode && (
