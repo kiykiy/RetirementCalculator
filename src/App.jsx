@@ -400,6 +400,12 @@ export default function App() {
   const [scenarioHovered,      setScenarioHovered]      = useState(false)
   const [scenarioActive,       setScenarioActive]       = useState(false)
   const [mobileInputsOpen,     setMobileInputsOpen]     = useState(false)
+  const [isMobileScreen,       setIsMobileScreen]       = useState(() => window.innerWidth < 640)
+  useEffect(() => {
+    const handler = () => setIsMobileScreen(window.innerWidth < 640)
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
   const [onboardingOpen,       setOnboardingOpen]       = useState(() => !_saved?.inputs?.userName)
   const [sideNavOpen,          setSideNavOpen]          = useState(false)
   const [scenarioOverlay,      setScenarioOverlay]      = useState(false)
@@ -1307,8 +1313,7 @@ export default function App() {
 
 
               {/* Snapshots — desktop only */}
-              {activeApp === 'retirement' && (
-                <div className="hidden sm:block">
+              {activeApp === 'retirement' && !isMobileScreen && (
                 <SnapshotsPanel
                   snapshots={snapshots}
                   activeSnapshotName={activeSnapshotName}
@@ -1321,7 +1326,6 @@ export default function App() {
                   onDelete={deleteSnapshot}
                   onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
                 />
-                </div>
               )}
 
 
@@ -2013,7 +2017,7 @@ export default function App() {
             </div>
             {/* Scrollable input panel */}
             <div className="flex-1 overflow-y-auto">
-              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} isMobile={true} />
             </div>
           </div>
         </div>

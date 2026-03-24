@@ -453,7 +453,7 @@ function PersonToggle({ primaryName, spouseName, active, onChange }) {
 let nextCustomId    = 1
 let nextRetIncomeId = 1
 
-export default function InputPanel({ inputs, onChange, onOpenAccounts, reProperties = [], simRows = [] }) {
+export default function InputPanel({ inputs, onChange, onOpenAccounts, reProperties = [], simRows = [], isMobile = false }) {
   const [active, setActive] = useState(null)
   const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary', meltdown: 'primary' })
   // HELOC tool local state
@@ -1562,8 +1562,7 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
       {/* ── Submenu panel (portal) ───────────────────────────────────────────────── */}
       {active && createPortal(
         (() => {
-          const isMobile = window.innerWidth < 640
-          const label    = NAV_ITEMS.find(i => i.key === active)?.label
+          const label = NAV_ITEMS.find(i => i.key === active)?.label
 
           /* ── Shared header ── */
           const header = (
