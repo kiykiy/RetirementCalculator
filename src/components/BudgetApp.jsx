@@ -1913,12 +1913,17 @@ function AcctSparkline({ balance = 0, rate = 0, monthlyAdd = 0, color = '#10b981
 }
 
 // ─── Budget Sankey ─────────────────────────────────────────────────────────────
-// SVG Sankey diagram: income → expense items + surplus.
-// showActual: when true, uses transaction actuals instead of planned amounts.
+// 3-column SVG Sankey: Income → [Fixed | Discretionary | Savings | Over Budget] → Items
+// showActual: when true uses transaction actuals instead of planned amounts.
 function BudgetSankey({ expenseSections, capex, totalNet,
   transactions, planYear, periodMos, periodLabel: pLabel, darkMode, showActual }) {
 
-  const W = 520, H = 320, nodeW = 12, PAD = 4
+  const W = 580, H = 340, nodeW = 13, PAD = 5
+  const xL  = nodeW                        // income bar right edge
+  const xMl = Math.round(W * 0.37)         // mid column left
+  const xMr = xMl + nodeW                  // mid column right
+  const xRl = W - nodeW                    // right column left
+  const [tooltip, setTooltip] = useState(null)
 
   const periodNet = totalNet * periodMos.length
 
@@ -1935,10 +1940,29 @@ function BudgetSankey({ expenseSections, capex, totalNet,
     return map
   }, [transactions, planYear, periodMos, showActual])
 
-  // Build item-level right nodes
-  const rightRaw = []
+  // ── Middle column groups ───────────────────────────────────────────────────
+  const MID_GROUPS = [
+    { id: 'fixed',         label: 'Fixed',        color: '#6366f1', desc: 'Non-controllable' },
+    { id: 'discretionary', label: 'Discretionary', color: '#f59e0b', desc: 'Controllable' },
+    { id: 'savings',       label: 'Savings',       color: '#10b981', desc: 'Wealth building' },
+    { id: 'overbudget',    label: 'Over Budget',   color: '#ef4444', desc: 'Budget shortfall' },
+  ]
+  const GROUP_ORDER = { fixed: 0, discretionary: 1, savings: 2, overbudget: 3 }
+
+  function classifyNode(id, label) {
+    if (id === '_deficit')  return 'overbudget'
+    if (id === '_surplus')  return 'savings'
+    const n = label.toLowerCase()
+    if (/mortgage|rent|car\b|auto|loan|insurance|tax|phone|internet|cell|cable|hydro|electric|gas\b|water|condo|strata|hoa|utility|utilities/.test(n)) return 'fixed'
+    if (/rrsp|tfsa|sav|invest|pension|retire|resp|emergency|reserve|capex/.test(n)) return 'savings'
+    return 'discretionary'
+  }
+
+  // ── Build right nodes ─────────────────────────────────────────────────────
   const palette = ['#f59e0b','#3b82f6','#8b5cf6','#ec4899','#f97316','#0ea5e9','#84cc16','#14b8a6','#a855f7','#6366f1','#10b981','#ef4444','#fb923c','#34d399','#818cf8']
   let colorIdx = 0
+  const rightRaw = []
+
   for (const sec of expenseSections) {
     for (const item of sec.items) {
       const leafs = item.subItems?.length ? item.subItems : [item]
@@ -1950,85 +1974,241 @@ function BudgetSankey({ expenseSections, capex, totalNet,
           s + periodMos.reduce((ss, mi) => ss + (itemMonths(l, planYear)[mi] ?? 0), 0), 0)
       }
       if (val > 0.5) {
-        rightRaw.push({ id: item.id, label: item.name, value: val, color: palette[colorIdx % palette.length] })
+        const group = classifyNode(item.id, item.name)
+        rightRaw.push({ id: item.id, label: item.name, value: val, color: palette[colorIdx % palette.length], section: sec.name, group })
         colorIdx++
       }
     }
   }
 
-  // CapEx scaled
+  // CapEx
   const capexTotal = capex.flatMap(g => g.items ?? []).filter(i => i.enabled !== false)
     .reduce((s, i) => s + (i.cost ?? 0) / Math.max(1, i.intervalYears ?? 1) / 12, 0) * periodMos.length
-  if (capexTotal > 0.5) rightRaw.push({ id: '_capex', label: 'CapEx Reserve', value: capexTotal, color: '#94a3b8' })
+  if (capexTotal > 0.5) rightRaw.push({ id: '_capex', label: 'CapEx Reserve', value: capexTotal, color: '#94a3b8', section: 'Capital Expenses', group: 'savings' })
 
-  // Cap at 18 nodes (keep largest)
-  const MAX_NODES = 18
+  // Cap nodes
+  const MAX_NODES = 20
   if (rightRaw.length > MAX_NODES) {
     rightRaw.sort((a, b) => b.value - a.value)
     rightRaw.splice(MAX_NODES)
-    rightRaw.sort((a, b) => {
-      // restore original order: by expenseSections order
-      const ai = expenseSections.flatMap(s => s.items).findIndex(it => it.id === a.id)
-      const bi = expenseSections.flatMap(s => s.items).findIndex(it => it.id === b.id)
-      return ai - bi
-    })
   }
 
   const totalRight = rightRaw.reduce((s, n) => s + n.value, 0)
   const surplus = periodNet - totalRight
-  if (surplus > 1) rightRaw.push({ id: '_surplus', label: 'Surplus', value: surplus, color: '#6366f1' })
-  else if (surplus < -1) rightRaw.push({ id: '_deficit', label: 'Deficit', value: Math.abs(surplus), color: '#ef4444' })
+  if (surplus > 1)   rightRaw.push({ id: '_surplus', label: 'Surplus',  value: surplus,           color: '#10b981', section: 'Savings',          group: 'savings' })
+  else if (surplus < -1) rightRaw.push({ id: '_deficit', label: 'Deficit', value: Math.abs(surplus), color: '#ef4444', section: 'Budget Shortfall', group: 'overbudget' })
+
+  // Sort by group so mid→right flows are non-crossing
+  rightRaw.sort((a, b) => (GROUP_ORDER[a.group] ?? 99) - (GROUP_ORDER[b.group] ?? 99))
 
   const total = Math.max(periodNet, totalRight + Math.abs(surplus))
   if (total <= 0) return <p className="text-[11px] text-center py-8 text-gray-400">Add income and expenses to see the flow</p>
 
-  function layoutNodes(nodes, T, H, PAD) {
-    const usable = H - PAD * Math.max(0, nodes.length - 1)
+  // ── Layout helper ─────────────────────────────────────────────────────────
+  function layoutNodes(nodes, T, Hh, Pp) {
+    const usable = Hh - Pp * Math.max(0, nodes.length - 1)
     let y = 0
     return nodes.map(n => {
       const h = Math.max(3, (n.value / T) * usable)
       const node = { ...n, y, h }
-      y += h + PAD
+      y += h + Pp
       return node
     })
   }
 
+  // ── Build mid nodes ───────────────────────────────────────────────────────
+  const midRaw = MID_GROUPS
+    .map(g => ({ ...g, value: rightRaw.filter(n => n.group === g.id).reduce((s, n) => s + n.value, 0) }))
+    .filter(g => g.value > 0)
+
   const incomeColor = '#10b981'
-  const leftH = Math.max(3, (periodNet / total) * H)
+  const leftH  = Math.max(3, (periodNet / total) * H)
+  const mNodes = layoutNodes(midRaw, total, H, PAD)
   const rNodes = layoutNodes(rightRaw, total, H, PAD)
   const tc = darkMode ? '#9ca3af' : '#6b7280'
 
-  let leftCursor = 0
-  const flows = rNodes.map(rn => {
-    const share = rn.value / total
-    const lh = share * leftH
-    const x0 = nodeW, y0t = leftCursor, y0b = leftCursor + lh
-    const x1 = W - nodeW, y1t = rn.y, y1b = rn.y + rn.h
-    const cx = (x0 + x1) / 2
-    leftCursor += lh
+  // ── Income → Mid flows ────────────────────────────────────────────────────
+  let lCursor = 0
+  const incToMidFlows = mNodes.map(mn => {
+    const lh = (mn.value / total) * leftH
+    const y0t = lCursor, y0b = lCursor + lh
+    const cx  = (xL + xMl) / 2
+    lCursor  += lh
     return {
-      color: rn.color,
-      d: `M ${x0} ${y0t} C ${cx} ${y0t}, ${cx} ${y1t}, ${x1} ${y1t}
-          L ${x1} ${y1b} C ${cx} ${y1b}, ${cx} ${y0b}, ${x0} ${y0b} Z`,
+      id: mn.id, label: mn.label, value: mn.value, color: mn.color,
+      section: mn.desc, isGroup: true,
+      d: `M ${xL} ${y0t} C ${cx} ${y0t}, ${cx} ${mn.y},        ${xMl} ${mn.y}
+          L ${xMl} ${mn.y + mn.h} C ${cx} ${mn.y + mn.h}, ${cx} ${y0b}, ${xL} ${y0b} Z`,
     }
   })
 
+  // ── Mid → Right flows ─────────────────────────────────────────────────────
+  const midCursors = Object.fromEntries(mNodes.map(mn => [mn.id, mn.y]))
+  const midToRightFlows = rNodes.map((rn, i) => {
+    const item = rightRaw[i]
+    const mn   = mNodes.find(m => m.id === item.group)
+    if (!mn) return null
+    const mh   = (item.value / mn.value) * mn.h
+    const y0t  = midCursors[item.group]
+    const y0b  = y0t + mh
+    midCursors[item.group] += mh
+    const cx   = (xMr + xRl) / 2
+    return {
+      id: rn.id, label: rn.label, value: rn.value, color: rn.color,
+      section: mn.label, group: item.group,
+      d: `M ${xMr} ${y0t} C ${cx} ${y0t}, ${cx} ${rn.y},        ${xRl} ${rn.y}
+          L ${xRl} ${rn.y + rn.h} C ${cx} ${rn.y + rn.h}, ${cx} ${y0b}, ${xMr} ${y0b} Z`,
+    }
+  }).filter(Boolean)
+
+  // ── Tooltip helpers ───────────────────────────────────────────────────────
+  const pctOfIncome = n => periodNet > 0 ? (n.value / periodNet * 100).toFixed(1) : '—'
+  const monthly     = n => periodMos.length > 1 ? fmtFull(n.value / periodMos.length) + '/mo' : null
+  const svgRect     = e => e.currentTarget.closest('svg').parentElement.getBoundingClientRect()
+  const showTip     = (e, data) => {
+    const r = svgRect(e)
+    setTooltip({ ...data, x: e.clientX - r.left, y: e.clientY - r.top })
+  }
+  const moveTip = e => {
+    const r = svgRect(e)
+    setTooltip(prev => prev ? { ...prev, x: e.clientX - r.left, y: e.clientY - r.top } : prev)
+  }
+
+  const activeId = tooltip?.id
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, overflow: 'visible' }}>
-      {flows.map((f, i) => <path key={i} d={f.d} fill={f.color} opacity={0.3} />)}
-      <rect x={0} y={0} width={nodeW} height={leftH} rx={3} fill={incomeColor} />
-      <text x={nodeW + 5} y={leftH / 2} dominantBaseline="middle" fontSize={9} fill={tc} fontWeight={600}>
-        {pLabel}
-      </text>
-      {rNodes.map(rn => (
-        <g key={rn.id}>
-          <rect x={W - nodeW} y={rn.y} width={nodeW} height={Math.max(2, rn.h)} rx={2} fill={rn.color} />
-          <text x={W - nodeW - 5} y={rn.y + rn.h / 2} textAnchor="end" dominantBaseline="middle" fontSize={8.5} fill={tc}>
-            {rn.label} · {fmtFull(rn.value)}
-          </text>
-        </g>
-      ))}
-    </svg>
+    <div className="relative select-none" onMouseLeave={() => setTooltip(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, overflow: 'visible' }}>
+
+        {/* ── Income → Mid flows (background layer) ── */}
+        {incToMidFlows.map((f, i) => (
+          <path key={`im${i}`} d={f.d} fill={f.color}
+            opacity={activeId ? (activeId === f.id ? 0.45 : 0.08) : 0.2}
+            style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+            onMouseEnter={e => showTip(e, f)} onMouseMove={moveTip}
+          />
+        ))}
+
+        {/* ── Mid → Right flows ── */}
+        {midToRightFlows.map((f, i) => (
+          <path key={`mr${i}`} d={f.d} fill={f.color}
+            opacity={activeId ? (activeId === f.id ? 0.65 : 0.08) : 0.3}
+            style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+            onMouseEnter={e => showTip(e, f)} onMouseMove={moveTip}
+          />
+        ))}
+
+        {/* ── Income bar ── */}
+        <rect x={0} y={0} width={nodeW} height={leftH} rx={3} fill={incomeColor} />
+        <text x={xL + 5} y={leftH / 2} dominantBaseline="middle" fontSize={9} fill={tc} fontWeight={600}>
+          {pLabel}
+        </text>
+
+        {/* ── Mid column nodes ── */}
+        {mNodes.map(mn => {
+          const grp = MID_GROUPS.find(g => g.id === mn.id)
+          return (
+            <g key={mn.id} style={{ cursor: 'pointer' }}
+              onMouseEnter={e => showTip(e, { ...mn, section: grp?.desc ?? '', isGroup: true })}
+              onMouseMove={moveTip}
+            >
+              <rect x={xMl} y={mn.y} width={nodeW} height={Math.max(3, mn.h)} rx={3} fill={mn.color}
+                opacity={activeId ? (activeId === mn.id ? 1 : 0.35) : 1}
+                style={{ transition: 'opacity 0.15s' }}
+              />
+              {/* Label above node */}
+              <text x={xMl + nodeW / 2} y={mn.y - 4} textAnchor="middle" fontSize={7.5}
+                fill={mn.color} fontWeight={700}
+                opacity={activeId ? (activeId === mn.id ? 1 : 0.4) : 1}
+                style={{ transition: 'opacity 0.15s' }}>
+                {mn.label}
+              </text>
+              {/* Amount below node (only if enough space) */}
+              {mn.h > 12 && (
+                <text x={xMl + nodeW / 2} y={mn.y + mn.h + 9} textAnchor="middle" fontSize={7}
+                  fill={tc} opacity={activeId ? (activeId === mn.id ? 0.9 : 0.2) : 0.7}>
+                  {fmtFull(mn.value)}
+                </text>
+              )}
+            </g>
+          )
+        })}
+
+        {/* ── Right column nodes ── */}
+        {rNodes.map(rn => {
+          const flow = midToRightFlows.find(f => f.id === rn.id)
+          return (
+            <g key={rn.id} style={{ cursor: 'pointer' }}
+              onMouseEnter={e => flow && showTip(e, flow)} onMouseMove={moveTip}
+            >
+              <rect x={xRl} y={rn.y} width={nodeW} height={Math.max(2, rn.h)} rx={2} fill={rn.color}
+                opacity={activeId ? (activeId === rn.id ? 1 : 0.3) : 1}
+                style={{ transition: 'opacity 0.15s' }}
+              />
+              <text x={xRl - 5} y={rn.y + rn.h / 2} textAnchor="end" dominantBaseline="middle"
+                fontSize={8} fill={tc}
+                opacity={activeId ? (activeId === rn.id ? 1 : 0.3) : 1}
+                style={{ transition: 'opacity 0.15s' }}>
+                {rn.label} · {fmtFull(rn.value)}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+
+      {/* ── Hover Tooltip ── */}
+      {tooltip && (
+        <div
+          className="pointer-events-none absolute z-30 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl px-3 py-2.5 min-w-[175px]"
+          style={{
+            left: tooltip.x + 14,
+            top:  tooltip.y - 12,
+            transform: tooltip.x > W * 0.55 ? 'translateX(calc(-100% - 28px))' : undefined,
+          }}
+        >
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: tooltip.color }} />
+            <span className="text-[11px] font-bold text-gray-900 dark:text-gray-100 leading-tight">{tooltip.label}</span>
+          </div>
+          {tooltip.section && (
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 mb-2">{tooltip.section}</p>
+          )}
+          <div className="space-y-1">
+            <div className="flex justify-between gap-4">
+              <span className="text-[10px] text-gray-500">Period total</span>
+              <span className="text-[10px] font-bold text-gray-800 dark:text-gray-200 tabular-nums">{fmtFull(tooltip.value)}</span>
+            </div>
+            {monthly(tooltip) && (
+              <div className="flex justify-between gap-4">
+                <span className="text-[10px] text-gray-500">Monthly avg</span>
+                <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300 tabular-nums">{monthly(tooltip)}</span>
+              </div>
+            )}
+            <div className="flex justify-between gap-4">
+              <span className="text-[10px] text-gray-500">% of take-home</span>
+              <span className="text-[10px] font-semibold tabular-nums"
+                style={{ color: tooltip.id === '_surplus' ? '#10b981' : tooltip.id === '_deficit' || tooltip.id === 'overbudget' ? '#ef4444' : '#6b7280' }}>
+                {pctOfIncome(tooltip)}%
+              </span>
+            </div>
+            <div className="mt-1.5 h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${Math.min(100, parseFloat(pctOfIncome(tooltip)))}%`, background: tooltip.color }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mid-column legend ── */}
+      <div className="flex items-center gap-3 justify-center mt-2 flex-wrap">
+        {MID_GROUPS.filter(g => midRaw.find(m => m.id === g.id)).map(g => (
+          <div key={g.id} className="flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-sm" style={{ background: g.color }} />
+            <span className="text-[9px] font-semibold text-gray-500 dark:text-gray-400">{g.label}</span>
+            <span className="text-[9px] text-gray-400 dark:text-gray-500">({g.desc})</span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -2037,7 +2217,7 @@ function BudgetSankey({ expenseSections, capex, totalNet,
 function DashboardTab({
   totalGross, totalNet, totalExpenses, totalCapexMo, totalOutflow, netCashflow, savingsRate,
   incomes = [], province = 'ON',
-  expenseSections, capex, pieData, barData, darkMode, planYear,
+  expenseSections, capex, pieData, barData, darkMode, planYear, onPlanYearChange,
   transactions = [], debtAccounts = [],
   lifeExpectancy = 90, currentAge = 40,
   cashAccounts, investmentAccounts,
@@ -2054,6 +2234,7 @@ function DashboardTab({
 }) {
   const now = new Date()
   const [selPeriod, setSelPeriod] = useState({ type: 'quarter', q: 1 })
+  const [chartYear, setChartYear] = useState(() => planYear)
 
   // When dashDemo is on, include generated demo transactions
   const demoTxns = useMemo(() => dashDemo
@@ -2204,11 +2385,13 @@ function DashboardTab({
   const yFmt = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${Math.round(v)}`
 
   // ── Cashflow bar chart data ─────────────────────────────────────────────────
+  const chartExpByMonth = Array(12).fill(0).map((_, mi) =>
+    expenseSections.flatMap(s => s.items).reduce((s, item) => s + (itemMonthsAgg(item, chartYear)[mi] ?? 0), 0)
+  )
   const cashflowChartData = MONTHS.map((m, mi) => ({
     month: m,
     income: totalNet,
-    spending: expByMonth[mi],
-    cashflow: cashflowByMonth[mi],
+    expense: -(chartExpByMonth[mi] + totalCapexMo),
   }))
 
   // ── Recent transactions (last 8, non-demo, date desc) ───────────────────────
@@ -2625,56 +2808,47 @@ function DashboardTab({
 
       {/* ── 4. CASH FLOW CHART ── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">
-            Cash Flow · {planYear}
-          </h3>
+        <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow</h3>
           <div className="flex items-center gap-3">
-            {[['#10b981', 'Surplus'], ['#ef4444', 'Deficit'], ['#6b7280', 'Spending']].map(([color, label]) => (
-              <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
-                <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
-                {label}
-              </span>
-            ))}
+            {/* Year navigator */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setChartYear(y => y - 1)}
+                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-[11px]"
+              >‹</button>
+              <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300 w-10 text-center tabular-nums">{chartYear}</span>
+              <button
+                onClick={() => setChartYear(y => y + 1)}
+                className="w-5 h-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-[11px]"
+              >›</button>
+            </div>
+            {/* Legend */}
+            <div className="flex items-center gap-3">
+              {[['#10b981', 'Income'], ['#ef4444', 'Expenses']].map(([color, label]) => (
+                <span key={label} className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500">
+                  <span className="inline-block w-2 h-2 rounded-full" style={{ background: color }} />
+                  {label}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
         <ResponsiveContainer width="100%" height={180}>
-          <ComposedChart data={cashflowChartData} barCategoryGap="40%" margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
-            <defs>
-              <linearGradient id="cfGradPos" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor="#10b981" stopOpacity={0.18} />
-                <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-              </linearGradient>
-              <linearGradient id="cfGradNeg" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor="#ef4444" stopOpacity={0} />
-                <stop offset="100%" stopColor="#ef4444" stopOpacity={0.15} />
-              </linearGradient>
-            </defs>
+          <ComposedChart data={cashflowChartData} barCategoryGap="30%" margin={{ top: 12, right: 4, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? '#1f2937' : '#f3f4f6'} />
             <XAxis dataKey="month" tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={yFmt} width={46} />
+            <YAxis tick={{ fontSize: 9, fill: axisColor }} axisLine={false} tickLine={false} tickFormatter={v => yFmt(Math.abs(v))} width={46} />
             <ReTooltip
               contentStyle={tooltipStyle}
               formatter={(value, name) => {
-                const labels = { cashflow: 'Net Cashflow', spending: 'Spending', income: 'Income' }
+                const labels = { income: 'Income', expense: 'Expenses' }
                 return [`$${fmtNum(Math.round(Math.abs(value)))}`, labels[name] ?? name]
               }}
             />
-            <ReferenceLine y={0} stroke={darkMode ? '#374151' : '#e5e7eb'} strokeWidth={1} />
-            <Bar dataKey="cashflow" name="cashflow" maxBarSize={18} radius={[3, 3, 3, 3]}>
-              {cashflowChartData.map((entry, i) => (
-                <Cell key={i} fill={entry.cashflow >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.85} />
-              ))}
-            </Bar>
-            <Line
-              type="monotone"
-              dataKey="spending"
-              name="spending"
-              stroke={darkMode ? '#9ca3af' : '#6b7280'}
-              strokeWidth={1.5}
-              dot={false}
-              activeDot={{ r: 3, strokeWidth: 0 }}
-            />
+            <ReferenceLine y={0} stroke={darkMode ? '#4b5563' : '#d1d5db'} strokeWidth={1.5} />
+            <Bar dataKey="income" name="income" maxBarSize={16} radius={[3, 3, 0, 0]} fill="#10b981" fillOpacity={0.85} />
+            <Bar dataKey="expense" name="expense" maxBarSize={16} radius={[0, 0, 3, 3]} fill="#ef4444" fillOpacity={0.85} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
