@@ -101,28 +101,39 @@ function AccountTooltip({ row, type }) {
   } else if (type === 'grossWD') {
     balance = row.grossWithdrawal ?? 0
     lines = [
-      (row.rrifWithdrawn ?? 0) > 0 && { label: 'RRIF', value: row.rrifWithdrawn, color: 'text-red-500 dark:text-red-400' },
-      (row.tfsaWithdrawn ?? 0) > 0 && { label: 'TFSA', value: row.tfsaWithdrawn, color: 'text-violet-600 dark:text-violet-400' },
-      (row.nonRegWithdrawn ?? 0) > 0 && { label: 'Non-Reg', value: row.nonRegWithdrawn, color: 'text-amber-600 dark:text-amber-400' },
-      balance > 0 && { label: 'Total Gross W/D', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
+      (row.rrifWithdrawn ?? 0) > 0 && { label: 'RRIF (fully taxable)', value: row.rrifWithdrawn, color: 'text-red-500 dark:text-red-400' },
+      (row.tfsaWithdrawn ?? 0) > 0 && { label: 'TFSA (tax-free)', value: row.tfsaWithdrawn, color: 'text-violet-600 dark:text-violet-400' },
+      (row.nonRegWithdrawn ?? 0) > 0 && { label: 'Non-Reg (partial tax)', value: row.nonRegWithdrawn, color: 'text-amber-600 dark:text-amber-400' },
+      balance > 0 && { label: 'Total Cash from Portfolio', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
     ]
+    // Add note explaining difference from Gross Income
+    lines._note = 'Total cash withdrawn from all accounts. Differs from Gross Income because TFSA is tax-free and only the taxable portion of Non-Reg counts as income.'
   } else if (type === 'grossIncome') {
     balance = row.grossIncome ?? 0
-    const wd = row.grossWithdrawal ?? 0
+    const rrif = row.rrifWithdrawn ?? 0
     const cpp = row.cpp ?? 0
     const oas = row.oas ?? 0
     const db  = row.dbPension ?? 0
     const other = row.otherPension ?? 0
-    const inflow = row.cashInflow ?? 0
+    const cg  = row.capitalGain ?? 0
+    const cgTaxable = Math.round(cg * 0.5)
+    const nonRegFull = row.nonRegWithdrawn ?? 0
+    const tfsaWd = row.tfsaWithdrawn ?? 0
     lines = [
-      wd > 0    && { label: 'Portfolio W/D', value: wd, color: 'text-red-500 dark:text-red-400' },
-      cpp > 0   && { label: 'CPP', value: cpp, color: 'text-blue-600 dark:text-blue-400' },
-      oas > 0   && { label: 'OAS (net)', value: oas, color: 'text-blue-600 dark:text-blue-400' },
-      db > 0    && { label: 'DB Pension', value: db, color: 'text-emerald-600 dark:text-emerald-400' },
-      other > 0 && { label: 'Other Pension', value: other, color: 'text-emerald-600 dark:text-emerald-400' },
-      inflow > 0 && { label: 'One-Time Inflow', value: inflow, color: 'text-green-600 dark:text-green-400' },
-      balance > 0 && { label: 'Gross Income', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
+      rrif > 0     && { label: 'RRIF (100% taxable)', value: rrif, color: 'text-red-500 dark:text-red-400' },
+      cgTaxable > 0 && { label: 'Non-Reg cap gains (50%)', value: cgTaxable, color: 'text-amber-600 dark:text-amber-400' },
+      cpp > 0      && { label: 'CPP', value: cpp, color: 'text-blue-600 dark:text-blue-400' },
+      oas > 0      && { label: 'OAS (net of clawback)', value: oas, color: 'text-blue-600 dark:text-blue-400' },
+      db > 0       && { label: 'DB Pension', value: db, color: 'text-emerald-600 dark:text-emerald-400' },
+      other > 0    && { label: 'Other Pension', value: other, color: 'text-emerald-600 dark:text-emerald-400' },
+      balance > 0  && { label: 'Gross Taxable Income', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
     ]
+    // Excluded items note
+    const excluded = []
+    if (tfsaWd > 0) excluded.push(`TFSA $${Math.round(tfsaWd).toLocaleString()} (tax-free)`)
+    if (nonRegFull > 0 && cgTaxable < nonRegFull) excluded.push(`Non-Reg return of capital $${Math.round(nonRegFull - cgTaxable).toLocaleString()}`)
+    lines._note = 'Taxable income only — determines your tax bracket.'
+    if (excluded.length > 0) lines._excluded = `Not included: ${excluded.join(', ')}`
   }
 
   const activeLines = lines.filter(Boolean)
@@ -158,6 +169,13 @@ function AccountTooltip({ row, type }) {
             <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200 pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
               <span className="min-w-0">End Balance</span>
               <span className="tabular-nums whitespace-nowrap ml-2 shrink-0">{fmtFull(balance)}</span>
+            </div>
+          )}
+          {/* Explanatory notes for grossWD / grossIncome */}
+          {(type === 'grossWD' || type === 'grossIncome') && (lines._note || lines._excluded) && (
+            <div className="pt-1.5 mt-1 border-t border-gray-100 dark:border-gray-700 space-y-0.5">
+              {lines._note && <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-relaxed">{lines._note}</p>}
+              {lines._excluded && <p className="text-[10px] text-amber-500 dark:text-amber-400 leading-relaxed">{lines._excluded}</p>}
             </div>
           )}
           {type === 'tfsa' && (row.tfsaAnnualLimit ?? 0) > 0 && (
