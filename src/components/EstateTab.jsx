@@ -197,9 +197,25 @@ export default function EstateTab({ summary, result, inputs, onInputChange }) {
 
       </div>
 
+      {/* Real estate equity section */}
+      {(summary.reEquityAtDeath ?? 0) > 0 && (
+        <Section
+          label="Real Estate"
+          balance={summary.reEquityAtDeath}
+          badge="No capital gains tax*"
+          badgeColor="text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400"
+        >
+          <Line label="Projected property equity at death" value={fmt(summary.reEquityAtDeath)} indent />
+          <Line label="Principal residence — generally tax-free in Canada" value="✓" accent="text-emerald-600 dark:text-emerald-400" indent />
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 pl-3 leading-relaxed">
+            *Investment/rental properties may trigger capital gains on sale. Consult a tax advisor.
+          </p>
+        </Section>
+      )}
+
       {/* Summary totals */}
       <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-1.5">
-        <Line label="Gross estate" value={fmt(estate.grossEstate)} />
+        <Line label="Gross financial estate" value={fmt(estate.grossEstate)} />
         {estate.totalTax > 0 && (
           <Line label="Total tax at death" value={`−${fmt(estate.totalTax)}`} accent="text-red-500" />
         )}
@@ -211,12 +227,22 @@ export default function EstateTab({ summary, result, inputs, onInputChange }) {
           />
         )}
         <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800">
-          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Net Estate to Heirs</span>
+          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Net Financial Estate to Heirs</span>
           <span className="text-base font-bold tabular-nums text-gray-900 dark:text-gray-100">{fmt(estate.netEstate)}</span>
         </div>
+        {/* Total estate including RE equity */}
+        {(summary.reEquityAtDeath ?? 0) > 0 && (
+          <>
+            <Line label="Real estate equity" value={`+${fmt(summary.reEquityAtDeath)}`} accent="text-emerald-600 dark:text-emerald-400" />
+            <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Total Estate (incl. RE)</span>
+              <span className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{fmt(estate.netEstate + summary.reEquityAtDeath)}</span>
+            </div>
+          </>
+        )}
         {estate.grossEstate > 0 && (
           <p className="text-[10px] text-gray-400 text-right">
-            {pct(estate.netEstate / estate.grossEstate)} of gross estate preserved
+            {pct(estate.netEstate / estate.grossEstate)} of gross financial estate preserved
           </p>
         )}
       </div>

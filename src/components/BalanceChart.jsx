@@ -104,6 +104,9 @@ function ForecastButton({ showMC, onToggle, probabilityOfSuccess }) {
 export default function BalanceChart({ rows, accountMeta, inflation = 2.5, retirementAge, rrifExhaustedAge = null, darkMode = false, mcBands = null, probabilityOfSuccess = null, stressedRows = null, seqRiskLabel = null }) {
   const [real,   setReal]   = useState(false)
   const [showMC, setShowMC] = useState(false)
+  const [showRE, setShowRE] = useState(false)
+
+  const hasREData = rows?.some(r => (r.realEstateEquity ?? 0) > 0)
 
   if (!rows?.length || !accountMeta?.length) return null
 
@@ -116,6 +119,10 @@ export default function BalanceChart({ rows, accountMeta, inflation = 2.5, retir
     accountMeta.forEach(acc => {
       point[acc.id] = Math.round((r.accountBalances?.[acc.id] ?? 0) * deflate)
     })
+    if (showRE && hasREData) {
+      point.reEquity     = Math.round((r.realEstateEquity ?? 0) * deflate)
+      point.totalWealth  = Math.round((r.totalWealth      ?? r.portfolioTotal ?? 0) * deflate)
+    }
     return point
   })
 
@@ -147,6 +154,20 @@ export default function BalanceChart({ rows, accountMeta, inflation = 2.5, retir
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Retirement Portfolio</h3>
         <div className="flex items-center gap-1.5">
+          {/* RE equity toggle */}
+          {hasREData && (
+            <button
+              onClick={() => setShowRE(v => !v)}
+              className={`px-2.5 py-1 rounded-md text-xs transition-colors border ${
+                showRE
+                  ? 'bg-amber-100 border-amber-300 text-amber-700 font-medium dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300'
+                  : 'border-gray-200 text-gray-500 hover:text-gray-700 dark:border-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              }`}
+              title="Show real estate equity alongside portfolio"
+            >
+              🏠 RE Equity
+            </button>
+          )}
           {/* Monte Carlo toggle — only when bands are available */}
           {mcBands && <ForecastButton showMC={showMC} onToggle={() => setShowMC(v => !v)} probabilityOfSuccess={probabilityOfSuccess} />}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 text-xs dark:bg-gray-800">
@@ -265,6 +286,19 @@ export default function BalanceChart({ rows, accountMeta, inflation = 2.5, retir
                 strokeWidth={2.5}
                 strokeDasharray="6 3"
                 dot={false}
+              />
+            )}
+            {/* RE equity overlay — dashed amber line showing total wealth incl. property */}
+            {showRE && hasREData && (
+              <Line
+                type="monotone"
+                dataKey="totalWealth"
+                name="Total Wealth (incl. RE)"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                strokeDasharray="6 3"
+                dot={false}
+                legendType="line"
               />
             )}
           </ComposedChart>

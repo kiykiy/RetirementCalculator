@@ -41,6 +41,7 @@ const DEFAULT_INPUTS = {
   estateGoalEnabled: false,
   estateGoal:        0,
   spousalRollover:   false,
+  includeREinNetWorth: false,
   accounts: [
     { id: 'rrif',   name: 'RRSP / RRIF',    balance: 250000, annualContribution: 10500, returnRate: 7,   taxType: 'rrif'   },
     { id: 'tfsa',   name: 'TFSA',           balance: 80000,  annualContribution: 7000,  returnRate: 7,   taxType: 'tfsa'   },
@@ -1481,7 +1482,7 @@ export default function App() {
 
             {/* ── Inputs sidebar ── */}
             <aside className="shrink-0 hidden lg:flex overflow-y-auto">
-              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => setActiveApp('accounts')} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => setActiveApp('accounts')} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} />
             </aside>
 
             {/* ── Main content ── */}
@@ -1982,7 +1983,7 @@ export default function App() {
             </div>
             {/* Scrollable input panel */}
             <div className="flex-1 overflow-y-auto">
-              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} />
+              <InputPanel inputs={inputs} onChange={handleInputChange} onOpenAccounts={() => { setActiveApp('accounts'); setMobileInputsOpen(false) }} reProperties={budget.properties ?? []} simRows={allResults?.primary?.rows ?? []} />
             </div>
           </div>
         </div>

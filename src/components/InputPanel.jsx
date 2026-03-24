@@ -424,6 +424,7 @@ const NAV_ITEMS = [
   { key: 'gis',        label: 'Low-Income Benefits', cardWidth: 340 },
   { key: 'sensitivity',label: 'Sensitivity',     cardWidth: 420  },
   { key: 'survivor',   label: 'Survivor',        cardWidth: 400  },
+  { key: 'helocTool',  label: 'Home Equity',     cardWidth: 520  },
 ]
 
 // ─── Person toggle (Primary / Spouse) ─────────────────────────────────────────
@@ -452,9 +453,16 @@ function PersonToggle({ primaryName, spouseName, active, onChange }) {
 let nextCustomId    = 1
 let nextRetIncomeId = 1
 
-export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
+export default function InputPanel({ inputs, onChange, onOpenAccounts, reProperties = [], simRows = [] }) {
   const [active, setActive] = useState(null)
   const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary', meltdown: 'primary' })
+  // HELOC tool local state
+  const [helocRate,     setHelocRate]     = useState(7.2)
+  const [helocLimitPct, setHelocLimitPct] = useState(65)
+  const [helocDrawType, setHelocDrawType] = useState('auto') // 'auto' | 'fixed'
+  const [helocFixedDraw,setHelocFixedDraw]= useState(20000)
+  const [helocStartAge, setHelocStartAge] = useState(inputs.retirementAge ?? 65)
+  const [helocType,     setHelocType]     = useState('heloc') // 'heloc' | 'reverse'
   const set      = (key) => (val) => onChange({ ...inputs, [key]: val })
   const setSpouse = (key) => (val) => onChange({ ...inputs, spouse: { ...(inputs.spouse ?? {}), [key]: val } })
   const sp        = inputs.spouse ?? {}
@@ -1001,6 +1009,20 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
             RRIF/RRSP transfers to spouse tax-free at death. Defers RRIF tax — affects estate and "Net Estate to Heirs".
           </p>
         </div>
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={inputs.includeREinNetWorth ?? false}
+              onChange={e => set('includeREinNetWorth')(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-xs text-gray-700 dark:text-gray-300">Include real estate equity in estate</span>
+          </label>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
+            Shows projected property equity alongside financial accounts on the Estate tab and portfolio chart. Does not change withdrawal calculations — use the Home Equity tool below to model drawdowns.
+          </p>
+        </div>
       </div>
     ),
 
@@ -1304,6 +1326,195 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
           <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
             Simplified estimate — assumes 4% draw during retirement, 5% survivor draw. Actual RRIF minimums vary by age.
           </p>
+        </div>
+      )
+    })(),
+
+    // ── Home Equity / HELOC Tool ─────────────────────────────────────────────
+    helocTool: (() => {
+      const retAge  = inputs.retirementAge  ?? 65
+      const lifeExp = inputs.lifeExpectancy ?? 90
+      const retYears = lifeExp - retAge
+
+      // Property equity snapshot
+      const propEquity = reProperties.map(p => {
+        const yearsToRet = Math.max(0, retAge - (inputs.currentAge ?? 45))
+        const projVal    = (p.currentValue ?? 0) * Math.pow(1 + (p.appreciation ?? 3) / 100, yearsToRet)
+        const mort       = p.mortgage?.enabled ? p.mortgage : null
+        let   mortBal    = mort ? (mort.balance ?? 0) : 0
+        if (mort && mort.amortizationMonths > 0) {
+          const r   = (mort.rate ?? 0) / 100 / 12
+          const pmt = r === 0 ? mortBal / mort.amortizationMonths : mortBal * r / (1 - Math.pow(1 + r, -mort.amortizationMonths))
+          for (let m = 0; m < yearsToRet * 12 && mortBal > 0.01; m++) mortBal = Math.max(0, mortBal - (pmt - mortBal * r))
+        }
+        const equity = Math.max(0, projVal - mortBal)
+        const creditLimit = helocType === 'reverse'
+          ? Math.round(projVal * 0.55)
+          : Math.round(equity * (helocLimitPct / 100))
+        return { name: p.name || 'Property', projVal: Math.round(projVal), mortBal: Math.round(mortBal), equity: Math.round(equity), creditLimit }
+      })
+      const totalEquity      = propEquity.reduce((s, p) => s + p.equity,      0)
+      const totalCreditLimit = propEquity.reduce((s, p) => s + p.creditLimit,  0)
+
+      // Identify retirement shortfall years from sim rows
+      const shortfallRows = simRows.filter(r => r.portfolioTotal <= 0 && r.age >= retAge)
+      const firstShortfall = shortfallRows[0]?.age ?? null
+
+      // Model HELOC drawdown schedule
+      const rMonthly = helocRate / 100 / 12
+      let   helocBal = 0
+      const drawSchedule = []
+      for (let yr = 0; yr < retYears; yr++) {
+        const age = retAge + yr
+        const inShortfall = simRows.find(r => r.age === age)?.portfolioTotal <= 0
+        let annualDraw = 0
+        if (age >= helocStartAge) {
+          if (helocDrawType === 'auto') {
+            // Draw only what the portfolio is short
+            const portTotal = simRows.find(r => r.age === age)?.portfolioTotal ?? 0
+            const target    = simRows.find(r => r.age === age)?.grossWithdrawal ?? 0
+            if (portTotal <= 0 && target > 0) annualDraw = Math.min(target, totalCreditLimit - helocBal)
+          } else {
+            if (helocBal < totalCreditLimit) annualDraw = Math.min(helocFixedDraw, totalCreditLimit - helocBal)
+          }
+        }
+        const interest = helocBal * (helocRate / 100)
+        helocBal = helocBal + annualDraw + interest
+        drawSchedule.push({ age, annualDraw: Math.round(annualDraw), balance: Math.round(helocBal), interest: Math.round(interest), inShortfall })
+      }
+      const totalDrawn    = drawSchedule.reduce((s, r) => s + r.annualDraw, 0)
+      const finalBalance  = drawSchedule[drawSchedule.length - 1]?.balance ?? 0
+      const equityRemaining = Math.max(0, totalEquity - finalBalance)
+
+      const fmtD = n => n == null ? '—' : n >= 1_000_000 ? `$${(n/1_000_000).toFixed(2)}M` : n >= 1_000 ? `$${(n/1_000).toFixed(0)}K` : `$${Math.round(n).toLocaleString()}`
+
+      return (
+        <div className="space-y-4 text-xs">
+          {/* Intro */}
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed border-l-2 border-amber-300 dark:border-amber-700 pl-2.5 py-0.5">
+            Model using your home equity to cover portfolio shortfalls in retirement via a <strong className="text-gray-700 dark:text-gray-300">HELOC</strong> or <strong className="text-gray-700 dark:text-gray-300">Reverse Mortgage</strong>.
+          </p>
+
+          {reProperties.length === 0 ? (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2.5 text-[11px] text-amber-700 dark:text-amber-400">
+              No properties found. Add properties in the Real Estate module first.
+            </div>
+          ) : (<>
+
+            {/* Product type */}
+            <div className="flex items-center gap-2">
+              {[{ id: 'heloc', label: 'HELOC' }, { id: 'reverse', label: 'Reverse Mortgage' }].map(t => (
+                <button key={t.id} onClick={() => setHelocType(t.id)}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-colors border ${helocType === t.id ? 'bg-amber-500 text-white border-amber-500' : 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-amber-300 hover:text-amber-600'}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Property equity summary */}
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Property Equity at Retirement (age {retAge})</p>
+              {propEquity.map((p, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg bg-gray-50 dark:bg-gray-800/60 px-2.5 py-2 gap-2">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 truncate">{p.name}</span>
+                  <div className="flex items-center gap-3 flex-shrink-0 text-[11px]">
+                    <span className="text-gray-400">Value <span className="text-gray-700 dark:text-gray-300 font-medium">{fmtD(p.projVal)}</span></span>
+                    {p.mortBal > 0 && <span className="text-gray-400">Mortgage <span className="text-red-500 font-medium">−{fmtD(p.mortBal)}</span></span>}
+                    <span className="text-gray-400">Equity <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{fmtD(p.equity)}</span></span>
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between px-2.5 py-1.5 border-t border-gray-100 dark:border-gray-800">
+                <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                  {helocType === 'reverse' ? 'Max draw (55% of value)' : `Credit limit (${helocLimitPct}% of equity)`}
+                </span>
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">{fmtD(totalCreditLimit)}</span>
+              </div>
+            </div>
+
+            {/* Parameters */}
+            <div className="space-y-2 border-t border-gray-100 dark:border-gray-800 pt-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Parameters</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <label className="text-[10px] text-gray-400 dark:text-gray-500">Interest rate %</label>
+                  <input type="number" min={1} max={20} step={0.1} value={helocRate} onChange={e => setHelocRate(parseFloat(e.target.value) || 7.2)}
+                    className="input-field !text-xs !py-1 w-full mt-0.5" />
+                </div>
+                {helocType === 'heloc' && (
+                  <div>
+                    <label className="text-[10px] text-gray-400 dark:text-gray-500">Credit limit % of equity</label>
+                    <input type="number" min={10} max={80} step={5} value={helocLimitPct} onChange={e => setHelocLimitPct(parseInt(e.target.value) || 65)}
+                      className="input-field !text-xs !py-1 w-full mt-0.5" />
+                  </div>
+                )}
+                <div>
+                  <label className="text-[10px] text-gray-400 dark:text-gray-500">Draw start age</label>
+                  <input type="number" min={retAge} max={lifeExp} value={helocStartAge} onChange={e => setHelocStartAge(parseInt(e.target.value) || retAge)}
+                    className="input-field !text-xs !py-1 w-full mt-0.5" />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-[10px] text-gray-400 dark:text-gray-500">Draw strategy:</span>
+                {[{ id: 'auto', label: 'Cover shortfalls only' }, { id: 'fixed', label: 'Fixed annual draw' }].map(t => (
+                  <button key={t.id} onClick={() => setHelocDrawType(t.id)}
+                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-medium transition-colors ${helocDrawType === t.id ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              {helocDrawType === 'fixed' && (
+                <div>
+                  <label className="text-[10px] text-gray-400 dark:text-gray-500">Annual draw amount</label>
+                  <input type="number" min={0} step={1000} value={helocFixedDraw} onChange={e => setHelocFixedDraw(parseInt(e.target.value) || 0)}
+                    className="input-field !text-xs !py-1 w-full mt-0.5" />
+                </div>
+              )}
+            </div>
+
+            {/* Shortfall analysis */}
+            {firstShortfall && (
+              <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-2.5 py-2 text-[11px] text-red-700 dark:text-red-400">
+                ⚠ Portfolio projected to run out at age <strong>{firstShortfall}</strong>. Home equity draw could bridge this gap.
+              </div>
+            )}
+            {!firstShortfall && simRows.length > 0 && (
+              <div className="rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 px-2.5 py-2 text-[11px] text-emerald-700 dark:text-emerald-400">
+                ✓ No portfolio shortfall detected. Home equity remains a reserve for unexpected needs or estate goals.
+              </div>
+            )}
+
+            {/* Draw schedule summary */}
+            {totalDrawn > 0 && (
+              <div className="space-y-1.5 border-t border-gray-100 dark:border-gray-800 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Draw Schedule</p>
+                <div className="max-h-40 overflow-y-auto space-y-0.5 pr-1">
+                  {drawSchedule.filter(r => r.annualDraw > 0 || r.balance > 0).map(r => (
+                    <div key={r.age} className={`flex items-center justify-between text-[10px] px-2 py-0.5 rounded ${r.inShortfall ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-gray-800/40'}`}>
+                      <span className="text-gray-500">Age {r.age}</span>
+                      {r.annualDraw > 0 && <span className="text-amber-600 dark:text-amber-400">Draw {fmtD(r.annualDraw)}</span>}
+                      {r.interest > 0  && <span className="text-red-400">Interest {fmtD(r.interest)}</span>}
+                      <span className="font-medium text-gray-700 dark:text-gray-300">Bal {fmtD(r.balance)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-3 space-y-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">Impact Summary</p>
+              <div className="flex justify-between"><span className="text-gray-500">Total equity drawn</span><span className="font-semibold tabular-nums text-amber-600 dark:text-amber-400">{fmtD(totalDrawn)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Total interest accrued</span><span className="font-semibold tabular-nums text-red-500">{fmtD(drawSchedule.reduce((s,r) => s+r.interest,0))}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Outstanding balance at death</span><span className="font-semibold tabular-nums text-red-500">{fmtD(finalBalance)}</span></div>
+              <div className="flex justify-between border-t border-gray-100 dark:border-gray-800 pt-1"><span className="font-semibold text-gray-700 dark:text-gray-300">Equity remaining for estate</span><span className="font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{fmtD(equityRemaining)}</span></div>
+            </div>
+
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 italic leading-relaxed">
+              {helocType === 'reverse' ? 'Reverse mortgage: no payments required — balance compounds until sale or death. Max 55% of appraised value (Canadian rules).' : 'HELOC: interest compounds on outstanding balance. Lender approval required — typically 65–80% of home equity.'}
+            </p>
+
+          </>)}
         </div>
       )
     })(),
