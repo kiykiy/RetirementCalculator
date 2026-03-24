@@ -1196,10 +1196,10 @@ function ExpensesTab({
 
                   return (
                     <Fragment>
-                      {/* CapEx Reserve header — sticky */}
+                      {/* Big Purchases Reserve header — sticky */}
                       <tr className="bg-slate-50 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-800">
                         <td className="py-1.5 px-2 sticky left-0 bg-slate-50 dark:bg-slate-900 z-10">
-                          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">CapEx Reserve</span>
+                          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Big Purchases Reserve</span>
                           {totalCapexMo > 0 && <span className="ml-2 text-[11px] text-slate-400 tabular-nums">{fmtFull(totalCapexMo)}/mo</span>}
                         </td>
                         <td colSpan={COL_SPAN - 1} className="bg-slate-50 dark:bg-slate-900/40" />
@@ -1235,7 +1235,7 @@ function ExpensesTab({
                 {/* CapEx subtotal */}
                 {totalCapexMo > 0 && (
                   <tr className="border-t border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/30">
-                    <td className="py-1.5 px-2 font-semibold text-slate-600 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-900 z-10 text-[11px] uppercase tracking-wide">CapEx Subtotal</td>
+                    <td className="py-1.5 px-2 font-semibold text-slate-600 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-900 z-10 text-[11px] uppercase tracking-wide">Big Purchases Subtotal</td>
                     <td />
                     <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-[11px]">{fmtFull(totalCapexMo)}/mo</td>
                     <td className="py-1.5 px-0.5 text-right font-semibold text-slate-600 dark:text-slate-400 tabular-nums text-[11px]">{fmtFull(totalCapexMo * 12)}</td>
@@ -1726,7 +1726,7 @@ function CapExProjectionChart({ capex, reserveBal, darkMode, projYears = 30 }) {
       <div className="flex items-start justify-between mb-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-            CapEx Reserve · {PROJ_YEARS}-Year Outlook
+            Big Purchases Reserve · {PROJ_YEARS}-Year Outlook
           </p>
           <p className="text-[10px] text-gray-300 dark:text-gray-600 mt-0.5">
             Drag to scroll ·{' '}
@@ -2029,7 +2029,7 @@ function BudgetSankey({ expenseSections, capex, totalNet,
   // CapEx
   const capexTotal = capex.flatMap(g => g.items ?? []).filter(i => i.enabled !== false)
     .reduce((s, i) => s + (i.cost ?? 0) / Math.max(1, i.intervalYears ?? 1) / 12, 0) * periodMos.length
-  if (capexTotal > 0.5) rightRaw.push({ id: '_capex', label: 'CapEx Reserve', value: capexTotal, color: '#94a3b8', section: 'Capital Expenses', group: 'savings' })
+  if (capexTotal > 0.5) rightRaw.push({ id: '_capex', label: 'Big Purchases Reserve', value: capexTotal, color: '#94a3b8', section: 'Capital Expenses', group: 'savings' })
 
   // Cap nodes
   const MAX_NODES = 20
