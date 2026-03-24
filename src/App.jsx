@@ -1998,8 +1998,8 @@ export default function App() {
         <div className="fixed inset-0 z-50 flex">
           {/* Backdrop */}
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileInputsOpen(false)} />
-          {/* Drawer panel */}
-          <div className="relative ml-auto w-full max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden">
+          {/* Drawer panel — slides in from the left */}
+          <div className="relative w-full max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden">
             {/* Drawer header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
               <div>
