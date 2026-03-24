@@ -191,13 +191,17 @@ function getMarginalRate(taxableIncome, brackets) {
  * @param {number} params.rrif        RRIF / RRSP withdrawals (fully taxable)
  * @param {number} params.cpp         CPP income
  * @param {number} params.oas         OAS income (before clawback)
- * @param {number} params.capitalGain Realized capital gains (50% inclusion)
+ * @param {number} params.capitalGain Realized capital gains
  * @param {number} params.pension     Other pension income
  * @param {string} params.province    Province code e.g. "ON"
  * @returns {{ federal, provincial, oasClawback, total, effectiveRate, marginalRate, netOas }}
  */
 export function calcTax({ rrif = 0, cpp = 0, oas = 0, capitalGain = 0, ordinaryNonReg = 0, pension = 0, province = 'ON' }) {
-  const cgInclusion = capitalGain * 0.5
+  // Capital gains inclusion: 50% on first $250K, 66.67% on excess (2024+ rules)
+  const CG_THRESHOLD = 250_000
+  const cgBelow = Math.min(capitalGain, CG_THRESHOLD)
+  const cgAbove = Math.max(0, capitalGain - CG_THRESHOLD)
+  const cgInclusion = cgBelow * 0.5 + cgAbove * (2 / 3)
 
   // Net income (before OAS clawback)
   // ordinaryNonReg: non-reg gains taxed as regular income (100% inclusion)
@@ -245,6 +249,16 @@ export function calcTax({ rrif = 0, cpp = 0, oas = 0, capitalGain = 0, ordinaryN
     netOas: Math.round(netOas),
     taxableIncome: Math.round(taxableIncome),
   }
+}
+
+/**
+ * Capital gains taxable inclusion: 50% on first $250K, 66.67% on excess.
+ */
+export function cgInclusion(gain) {
+  if (gain <= 0) return 0
+  const below = Math.min(gain, 250_000)
+  const above = Math.max(0, gain - 250_000)
+  return below * 0.5 + above * (2 / 3)
 }
 
 // ─── RRIF Minimum Withdrawal Factors ─────────────────────────────────────────

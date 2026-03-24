@@ -178,7 +178,11 @@ export default function EstateTab({ summary, result, inputs, onInputChange }) {
           <Section label="Non-Registered" balance={estate.nonRegBalance} badge="Capital gains" badgeColor="text-amber-600 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-400">
             <Line label="Cost basis" value={fmt(estate.nonRegBasis)} indent />
             <Line label="Accrued gain" value={fmt(estate.nonRegGain)} indent />
-            <Line label="Taxable (50% inclusion)" value={fmt(Math.round(estate.nonRegGain * 0.5))} indent />
+            <Line label="Taxable inclusion" value={fmt(Math.round(
+              estate.nonRegGain <= 250_000
+                ? estate.nonRegGain * 0.5
+                : 250_000 * 0.5 + (estate.nonRegGain - 250_000) * (2/3)
+            ))} indent />
             <Line label="Capital gains tax" value={`−${fmt(estate.nonRegTax)}`} accent="text-red-500" indent />
             <Line label="Net to estate" value={fmt(estate.nonRegBalance - estate.nonRegTax)} accent="text-gray-700 dark:text-gray-300" indent />
           </Section>

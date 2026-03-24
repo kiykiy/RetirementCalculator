@@ -1,5 +1,5 @@
 // ─── Main Retirement Simulation Loop ─────────────────────────────────────────
-import { calcTax, rrif_minimum } from './tax.js'
+import { calcTax, rrif_minimum, cgInclusion } from './tax.js'
 import { createStrategy } from './strategies.js'
 
 // ─── CPP / OAS / DB helpers ───────────────────────────────────────────────────
@@ -270,6 +270,9 @@ export function runSimulation(inputs) {
     tfsaIndexedToInflation = false,
     retirementIncomes = [],
     withdrawalSequence = ['nonreg', 'tfsa', 'rrif'],
+    incomeTargetPhases = null,   // [{ years, amount }] — phase-based spending override
+    // Real estate (injected from App.jsx)
+    reProperties = [],
   } = inputs
 
   const ordinaryFrac = nonRegOrdinaryPct / 100
@@ -455,7 +458,19 @@ export function runSimulation(inputs) {
       rrifDrawdownTarget  = Math.max(rrif_min, bracketTarget)
     }
 
-    const strategyTarget = strategy({ age, year, retirementYear, portfolioTotal: portfolioAfterGrowth, inflation: ageInf })
+    let strategyTarget = strategy({ age, year, retirementYear, portfolioTotal: portfolioAfterGrowth, inflation: ageInf })
+
+    // Phase-based spending override — inflation-adjusted from retirement age
+    if (incomeTargetPhases?.length > 0) {
+      const yearsIntoRet = age - retirementAge
+      let phaseAmount = incomeTargetPhases[incomeTargetPhases.length - 1].amount
+      let cumYears = 0
+      for (const phase of incomeTargetPhases) {
+        cumYears += phase.years
+        if (yearsIntoRet < cumYears) { phaseAmount = phase.amount; break }
+      }
+      strategyTarget = Math.round(phaseAmount * Math.pow(1 + ageInf, yearsIntoRet))
+    }
 
     const cashOutflowNet  = cashOutflows[age] || 0
     const outflowTaxRate  = cashOutflowTaxRates[age] || 0
@@ -510,7 +525,7 @@ export function runSimulation(inputs) {
     })
 
     const grossIncome    = rrifWithdrawn + annualCpp + annualOas + annualPension
-                         + capitalGainForTax * 0.5 + ordinaryNonReg
+                         + cgInclusion(capitalGainForTax) + ordinaryNonReg
     const netIncome      = Math.max(0, withdrawn + govIncome - taxResult.total)
     const withdrawalRate = portfolioAfterGrowth > 0 ? withdrawn / portfolioAfterGrowth * 100 : 0
 
@@ -670,6 +685,54 @@ export function runSimulation(inputs) {
     })
   }
 
+  // ── Real Estate equity projection ────────────────────────────────────────────
+  // Track property values & mortgage balances over retirement years
+  // (appreciation + paydown). Added to each row and used in estate calc.
+  const reState = (reProperties ?? []).map(p => {
+    const mort = p.mortgage?.enabled ? p.mortgage : null
+    let mortBal = mort ? (mort.balance ?? 0) : 0
+    // First pay down during working years (yearsToRet already computed above)
+    const mortR = mort ? (mort.rate ?? 0) / 100 / 12 : 0
+    const mortPmt = mort ? (() => {
+      if (!mort.balance || !mort.amortizationMonths) return 0
+      const r = mortR, n = mort.amortizationMonths
+      if (n <= 0) return 0
+      return r === 0 ? mort.balance / n : mort.balance * r / (1 - Math.pow(1 + r, -n))
+    })() : 0
+    // Pay down mortgage through working years
+    for (let m = 0; m < yearsToRet * 12 && mortBal > 0.01; m++) {
+      const interest = mortBal * mortR
+      mortBal = Math.max(0, mortBal - (mortPmt - interest))
+    }
+    return {
+      propValue: (p.currentValue ?? 0) * Math.pow(1 + (p.appreciation ?? 3) / 100, yearsToRet),
+      mortBal:   Math.max(0, mortBal),
+      mortR,
+      mortPmt,
+      appreciation: (p.appreciation ?? 3) / 100,
+    }
+  })
+
+  // Annotate each simulation row with real estate equity
+  // Track mortgage balances year-to-year (not recalculating from start each time)
+  const reMortBalances = reState.map(rs => rs.mortBal) // running mortgage balances
+  rows.forEach((row, i) => {
+    const yr = i + 1 // year into retirement
+    let reEquity = 0
+    reState.forEach((rs, j) => {
+      const projVal = rs.propValue * Math.pow(1 + rs.appreciation, yr)
+      // Pay down mortgage for this single year (12 months) from prior year's balance
+      let bal = reMortBalances[j]
+      for (let m = 0; m < 12 && bal > 0.01; m++) {
+        bal = Math.max(0, bal - (rs.mortPmt - bal * rs.mortR))
+      }
+      reMortBalances[j] = bal
+      reEquity += projVal - Math.max(0, bal)
+    })
+    row.realEstateEquity = Math.round(reEquity)
+    row.totalWealth      = row.portfolioTotal + Math.round(reEquity)
+  })
+
   // ── Summary ──────────────────────────────────────────────────────────────────
   const lastFunded = [...rows].reverse().find(r => r.portfolioTotal > 0 || r.netIncome > 0)
 
@@ -681,6 +744,12 @@ export function runSimulation(inputs) {
     balance:   Math.max(0, a.balance),
     costBasis: Math.max(0, a.costBasis ?? 0),
   }))
+
+  // Real estate equity at end of life (reMortBalances already paid down through all retirement years)
+  const reEquityAtDeath = reState.reduce((sum, rs, j) => {
+    const projVal = rs.propValue * Math.pow(1 + rs.appreciation, rows.length)
+    return sum + projVal - Math.max(0, reMortBalances[j])
+  }, 0)
 
   const summary = {
     yearsInRetirement:     rows.length,
@@ -694,6 +763,7 @@ export function runSimulation(inputs) {
     portfolioExhaustedAge: rows.find(r => r.portfolioTotal <= 0)?.age || null,
     rrifExhaustedAge:      rows.find(r => r.rrifTotal      <= 0)?.age || null,
     finalAccounts,
+    reEquityAtDeath:       Math.round(reEquityAtDeath),
   }
 
   const accountMeta = simAccounts.map(a => ({ id: a.id, name: a.name, taxType: a.taxType }))

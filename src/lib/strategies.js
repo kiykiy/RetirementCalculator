@@ -253,7 +253,7 @@ export function targetedEndingBalanceStrategy(params, simOptions) {
       if (tfsaRoom > 0 && nonReg > 0) {
         const xfer     = Math.min(nonReg, tfsaRoom)
         const gainFrac = Math.max(0, 1 - nonRegCostBasisFrac)
-        const taxOnXfer = xfer * gainFrac * 0.5 * estimatedTaxRate // 50% inclusion rate
+        const taxOnXfer = xfer * gainFrac * 0.5 * estimatedTaxRate // 50% inclusion (TFSA xfer always < $250K threshold)
         const netXfer   = Math.max(0, xfer - taxOnXfer)
         nonReg -= xfer
         tfsa   += netXfer
