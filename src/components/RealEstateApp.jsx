@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 
 // ─── Exported Calculation Utilities ──────────────────────────────────────────
 // (imported by BudgetApp DashboardTab and AccountsApp for net worth totals)
@@ -32,6 +32,99 @@ export function calcRealEstateSummary(properties = []) {
   const totalMonthlyMortgagePayment = properties.reduce((s, p) => s + calcMortgagePayment(p.mortgage), 0)
   const totalMonthlyPropertyCosts   = properties.reduce((s, p) => s + calcMonthlyPropertyCosts(p), 0)
   return { totalPropertyValue, totalMortgageDebt, totalRealEstateEquity, monthlyRentalIncome, totalMonthlyMortgagePayment, totalMonthlyPropertyCosts }
+}
+
+// ─── City Benchmarks (Canadian Markets) ──────────────────────────────────────
+const CITY_BENCHMARKS = [
+  { city: 'Vancouver, BC',      appreciation: 7.5, capRate: 3.0, grossYield: 3.5 },
+  { city: 'Toronto, ON',        appreciation: 7.0, capRate: 3.5, grossYield: 4.0 },
+  { city: 'Victoria, BC',       appreciation: 5.5, capRate: 3.8, grossYield: 4.2 },
+  { city: 'Ottawa, ON',         appreciation: 5.0, capRate: 4.2, grossYield: 4.8 },
+  { city: 'Hamilton, ON',       appreciation: 5.5, capRate: 4.0, grossYield: 4.5 },
+  { city: 'Kelowna, BC',        appreciation: 5.0, capRate: 4.0, grossYield: 4.5 },
+  { city: 'Calgary, AB',        appreciation: 4.0, capRate: 5.0, grossYield: 5.5 },
+  { city: 'Edmonton, AB',       appreciation: 3.0, capRate: 5.5, grossYield: 6.2 },
+  { city: 'Montreal, QC',       appreciation: 5.0, capRate: 4.2, grossYield: 5.0 },
+  { city: 'Quebec City, QC',    appreciation: 3.5, capRate: 5.0, grossYield: 5.8 },
+  { city: 'Halifax, NS',        appreciation: 5.5, capRate: 4.5, grossYield: 5.2 },
+  { city: 'London, ON',         appreciation: 4.5, capRate: 4.8, grossYield: 5.5 },
+  { city: 'Kitchener-Waterloo', appreciation: 5.0, capRate: 4.5, grossYield: 5.0 },
+  { city: 'Windsor, ON',        appreciation: 4.0, capRate: 6.0, grossYield: 6.8 },
+  { city: 'Winnipeg, MB',       appreciation: 3.0, capRate: 5.5, grossYield: 6.2 },
+  { city: 'Regina, SK',         appreciation: 2.0, capRate: 6.0, grossYield: 7.0 },
+  { city: 'Saskatoon, SK',      appreciation: 2.5, capRate: 5.8, grossYield: 6.5 },
+  { city: 'Barrie, ON',         appreciation: 5.0, capRate: 4.5, grossYield: 5.0 },
+  { city: 'St. John\'s, NL',   appreciation: 2.5, capRate: 6.5, grossYield: 7.2 },
+  { city: 'National Average',   appreciation: 4.5, capRate: 4.5, grossYield: 5.2 },
+]
+
+// ─── DCF / IRR Engine ─────────────────────────────────────────────────────────
+function calcIRR(cashflows, guess = 0.1) {
+  // Newton-Raphson IRR solver; cashflows[0] is typically negative (investment)
+  let r = guess
+  for (let iter = 0; iter < 100; iter++) {
+    let npv = 0, dnpv = 0
+    for (let t = 0; t < cashflows.length; t++) {
+      const denom = Math.pow(1 + r, t)
+      npv  += cashflows[t] / denom
+      dnpv -= t * cashflows[t] / Math.pow(1 + r, t + 1)
+    }
+    if (Math.abs(dnpv) < 1e-12) break
+    const rNew = r - npv / dnpv
+    if (Math.abs(rNew - r) < 1e-8) { r = rNew; break }
+    r = rNew
+  }
+  return isFinite(r) ? r : null
+}
+
+function runDCF(inputs) {
+  const {
+    currentValue = 0,
+    grossYield   = 5,
+    vacancyRate  = 5,
+    opexRatio    = 40,
+    rentGrowth   = 2,
+    holdingYears = 10,
+    discountRate = 8,
+    termCapRate  = 4.5,
+    sellingCosts = 5,
+    mortgageBalance = 0,
+  } = inputs
+
+  const noi0 = currentValue * (grossYield / 100) * (1 - vacancyRate / 100) * (1 - opexRatio / 100)
+  const dr   = discountRate / 100
+  const rg   = rentGrowth / 100
+
+  const rows = []
+  let cumPV = 0
+  const cashflows = [-currentValue] // initial outflow
+
+  for (let yr = 1; yr <= holdingYears; yr++) {
+    const noi     = noi0 * Math.pow(1 + rg, yr - 1)
+    const pv      = noi / Math.pow(1 + dr, yr)
+    cumPV        += pv
+    cashflows.push(noi)
+    rows.push({ yr, noi: Math.round(noi), pv: Math.round(pv), cumPV: Math.round(cumPV) })
+  }
+
+  const terminalNOI   = noi0 * Math.pow(1 + rg, holdingYears)
+  const terminalValue = termCapRate > 0 ? terminalNOI / (termCapRate / 100) : 0
+  const grossProceeds = terminalValue * (1 - sellingCosts / 100)
+  const netProceeds   = Math.max(0, grossProceeds - mortgageBalance)
+
+  const pvTerminal  = terminalValue / Math.pow(1 + dr, holdingYears)
+  const npv         = cumPV + pvTerminal - currentValue
+
+  // Append terminal to cashflows for IRR
+  cashflows[holdingYears] = (cashflows[holdingYears] ?? 0) + grossProceeds
+  const irr = calcIRR(cashflows)
+
+  const impliedAppreciationPct =
+    currentValue > 0 && terminalValue > 0
+      ? (Math.pow(terminalValue / currentValue, 1 / holdingYears) - 1) * 100
+      : 0
+
+  return { rows, terminalValue: Math.round(terminalValue), netProceeds: Math.round(netProceeds), npv: Math.round(npv), irr, impliedAppreciationPct, pvTerminal: Math.round(pvTerminal) }
 }
 
 // ─── Demo Data ────────────────────────────────────────────────────────────────
@@ -390,13 +483,234 @@ function MortgageSection({ mortgage, onUpdate, readOnly, propertyValue = 0, appr
   )
 }
 
+// ─── DCF Modal ────────────────────────────────────────────────────────────────
+function DCFModal({ property, onClose, onCommit }) {
+  const cityBench = CITY_BENCHMARKS.find(c => c.city === property.city) ?? null
+
+  const [inputs, setInputs] = useState(() => {
+    const saved = property.dcfInputs ?? {}
+    return {
+      holdingYears:    saved.holdingYears    ?? 10,
+      discountRate:    saved.discountRate    ?? 8,
+      grossYield:      saved.grossYield      ?? (cityBench?.grossYield  ?? 5),
+      vacancyRate:     saved.vacancyRate     ?? (property.vacancyRate   ?? 5),
+      opexRatio:       saved.opexRatio       ?? 40,
+      rentGrowth:      saved.rentGrowth      ?? 2,
+      termCapRate:     saved.termCapRate     ?? (cityBench?.capRate     ?? 4.5),
+      sellingCosts:    saved.sellingCosts    ?? 5,
+    }
+  })
+
+  const set = (k, v) => setInputs(prev => ({ ...prev, [k]: v }))
+
+  const results = useMemo(() => runDCF({
+    ...inputs,
+    currentValue:    property.currentValue ?? 0,
+    mortgageBalance: property.mortgage?.enabled ? (property.mortgage?.balance ?? 0) : 0,
+  }), [inputs, property.currentValue, property.mortgage])
+
+  const { rows, terminalValue, netProceeds, npv, irr, impliedAppreciationPct } = results
+
+  const fmt  = v => '$' + Math.abs(Math.round(v)).toLocaleString('en-CA')
+  const fmtK = v => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : `$${Math.round(v/1000)}k`
+  const fmtPct = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%'
+  const irrPct = irr !== null ? (irr * 100).toFixed(1) + '%' : 'N/A'
+
+  const hasRevert = property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined
+
+  const SliderInput = ({ label, k, min, max, step = 0.5, suffix = '%', hint }) => (
+    <div>
+      <div className="flex justify-between items-center mb-1">
+        <label className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{label}</label>
+        <span className="text-xs font-bold text-gray-800 dark:text-gray-200 tabular-nums">{inputs[k]}{suffix}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={inputs[k]}
+        onChange={e => set(k, parseFloat(e.target.value))}
+        className="w-full h-1.5 rounded-full accent-brand-600 cursor-pointer" />
+      {hint && <p className="text-[9px] text-gray-400 mt-0.5">{hint}</p>}
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
+
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">📊 DCF Analysis — {property.name}</h2>
+            <p className="text-[11px] text-gray-400 mt-0.5">Discounted cash flow model to estimate implied annual appreciation</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-lg transition-colors text-lg leading-none">✕</button>
+        </div>
+
+        {/* Body: 2-col */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+
+          {/* Left panel — inputs */}
+          <div className="w-64 flex-shrink-0 border-r border-gray-100 dark:border-gray-700 p-4 overflow-y-auto space-y-4">
+
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Holding Period</p>
+              <SliderInput label="Years" k="holdingYears" min={3} max={30} step={1} suffix=" yrs" />
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Returns & Discount</p>
+              <div className="space-y-3">
+                <SliderInput label="Discount Rate" k="discountRate" min={3} max={20} step={0.25} hint="Your required rate of return" />
+                <SliderInput label="Gross Yield" k="grossYield" min={1} max={15} step={0.25} hint="Annual gross rent ÷ property value" />
+                <SliderInput label="Rent Growth /yr" k="rentGrowth" min={-2} max={8} step={0.25} />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Operating Costs</p>
+              <div className="space-y-3">
+                <SliderInput label="Vacancy Rate" k="vacancyRate" min={0} max={30} step={0.5} />
+                <SliderInput label="OpEx Ratio" k="opexRatio" min={10} max={70} step={1} hint="Management, maintenance, taxes etc." />
+              </div>
+            </div>
+
+            <div>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Exit Assumptions</p>
+              <div className="space-y-3">
+                <SliderInput label="Terminal Cap Rate" k="termCapRate" min={2} max={12} step={0.25} hint="Cap rate at exit" />
+                <SliderInput label="Selling Costs" k="sellingCosts" min={1} max={10} step={0.25} hint="Agent fees, legal, closing" />
+              </div>
+            </div>
+
+            {cityBench && (
+              <div className="rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 p-3 space-y-1">
+                <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">📍 {property.city}</p>
+                <p className="text-[10px] text-blue-700 dark:text-blue-300">Hist. appreciation: <strong>{cityBench.appreciation}%/yr</strong></p>
+                <p className="text-[10px] text-blue-700 dark:text-blue-300">Market cap rate: <strong>{cityBench.capRate}%</strong></p>
+                <button onClick={() => { set('grossYield', cityBench.grossYield); set('termCapRate', cityBench.capRate) }}
+                  className="mt-1.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                  Apply market benchmarks →
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right panel — results + table */}
+          <div className="flex-1 min-w-0 p-4 overflow-y-auto space-y-4">
+
+            {/* Key metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Terminal Value',  val: fmtK(terminalValue),                                             cls: 'text-blue-700 dark:text-blue-300',    bg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800/30' },
+                { label: 'Net Proceeds',    val: fmtK(netProceeds),                                               cls: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/30' },
+                { label: 'NPV',             val: (npv >= 0 ? '+' : '−') + fmtK(Math.abs(npv)),                    cls: npv >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300', bg: npv >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-800/30' : 'bg-rose-50 dark:bg-rose-900/20 border-rose-100 dark:border-rose-800/30' },
+                { label: 'IRR',             val: irrPct,                                                           cls: 'text-amber-700 dark:text-amber-300',   bg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800/30' },
+              ].map(({ label, val, cls, bg }) => (
+                <div key={label} className={`rounded-xl border p-3 ${bg}`}>
+                  <p className="text-[9px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{label}</p>
+                  <p className={`text-sm font-bold tabular-nums ${cls}`}>{val}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Implied appreciation highlight */}
+            <div className="rounded-xl border-2 border-brand-500 dark:border-brand-600 bg-brand-50 dark:bg-brand-900/20 px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-semibold text-brand-700 dark:text-brand-300 uppercase tracking-wider">Implied Annual Appreciation</p>
+                <p className="text-[10px] text-brand-500 dark:text-brand-400 mt-0.5">Based on terminal value ÷ current value over {inputs.holdingYears} years</p>
+              </div>
+              <p className="text-3xl font-black text-brand-600 dark:text-brand-400 tabular-nums">
+                {impliedAppreciationPct >= 0 ? '+' : ''}{impliedAppreciationPct.toFixed(2)}%<span className="text-base font-semibold">/yr</span>
+              </p>
+            </div>
+
+            {/* Year-by-year table */}
+            <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-700">
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 dark:text-gray-400">Year</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 dark:text-gray-400">NOI</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 dark:text-gray-400">PV of NOI</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 dark:text-gray-400">Cumulative PV</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                  {rows.map(row => (
+                    <tr key={row.yr} className="hover:bg-gray-50 dark:hover:bg-gray-800/40">
+                      <td className="px-3 py-1.5 font-medium text-gray-700 dark:text-gray-300">{new Date().getFullYear() + row.yr}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmt(row.noi)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-blue-600 dark:text-blue-400">{fmt(row.pv)}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-gray-300">{fmt(row.cumPV)}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-blue-50 dark:bg-blue-900/20 font-semibold border-t-2 border-blue-200 dark:border-blue-800/50">
+                    <td className="px-3 py-2 text-blue-700 dark:text-blue-300">Terminal Value</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300">{fmt(terminalValue)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300">{fmt(results.pvTerminal)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-blue-700 dark:text-blue-300">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 flex-shrink-0 gap-3">
+          <div className="flex items-center gap-2">
+            {hasRevert && (
+              <button
+                onClick={() => onCommit(property.appreciationBeforeDcf, null, true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+              >
+                ↩ Revert to {property.appreciationBeforeDcf?.toFixed(2)}%/yr
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose}
+              className="text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={() => onCommit(impliedAppreciationPct, inputs, false)}
+              className="flex items-center gap-1.5 text-xs font-bold text-white bg-brand-600 hover:bg-brand-700 px-4 py-2 rounded-lg transition-colors shadow-sm"
+            >
+              Commit {impliedAppreciationPct >= 0 ? '+' : ''}{impliedAppreciationPct.toFixed(2)}%/yr to Property
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Property Card ────────────────────────────────────────────────────────────
 function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
   const [showDetails, setShowDetails] = useState(true)
   const [showCosts,   setShowCosts]   = useState(false)
+  const [showDCF,     setShowDCF]     = useState(false)
 
   const upd = (f, v) => !readOnly && onUpdate(f, v)
   const updMort = (f, v) => !readOnly && onUpdate('mortgage', { ...(property.mortgage ?? {}), [f]: v })
+
+  const handleDCFCommit = (rate, dcfInputs, isRevert) => {
+    if (isRevert) {
+      onUpdate({
+        appreciation: rate,
+        appreciationBeforeDcf: null,
+        dcfInputs: null,
+      })
+    } else {
+      onUpdate({
+        appreciation: parseFloat(rate.toFixed(2)),
+        dcfInputs,
+        appreciationBeforeDcf: property.appreciationBeforeDcf ?? (property.appreciation ?? 3.5),
+      })
+    }
+    setShowDCF(false)
+  }
+
+  const cityBench = CITY_BENCHMARKS.find(c => c.city === property.city) ?? null
 
   const equity     = (property.currentValue ?? 0) - (property.mortgage?.enabled ? (property.mortgage?.balance ?? 0) : 0)
   const gain       = (property.currentValue ?? 0) - (property.purchasePrice ?? 0)
@@ -477,10 +791,56 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
                       <NumInput value={property.currentValue ?? 0} onChange={v => upd('currentValue', v)} prefix="$" step={5000} />
                     </div>
                     <div>
-                      <label className="label">Annual Appreciation</label>
+                      <label className="label">
+                        Annual Appreciation
+                        {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined && (
+                          <span className="ml-1 text-[9px] font-semibold text-brand-500 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/20 px-1 py-0.5 rounded">DCF</span>
+                        )}
+                      </label>
                       <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
                     </div>
                   </div>
+
+                  {/* City / Market picker */}
+                  <div>
+                    <label className="label">Market / City (for DCF benchmarks)</label>
+                    <select value={property.city ?? ''} onChange={e => {
+                        const city = e.target.value
+                        upd('city', city)
+                        const bench = CITY_BENCHMARKS.find(c => c.city === city)
+                        if (bench && !property.appreciation) upd('appreciation', bench.appreciation)
+                      }}
+                      className="input-field text-xs py-1 w-full">
+                      <option value="">— Select a market —</option>
+                      {CITY_BENCHMARKS.map(c => (
+                        <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%/yr hist.)</option>
+                      ))}
+                    </select>
+                    {cityBench && (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span className="text-[10px] text-gray-400">Historical: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></span>
+                        {Math.abs((property.appreciation ?? 0) - cityBench.appreciation) > 0.05 && (
+                          <button onClick={() => upd('appreciation', cityBench.appreciation)}
+                            className="text-[10px] font-semibold text-brand-600 dark:text-brand-400 hover:underline">
+                            Apply {cityBench.appreciation}% →
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* DCF button */}
+                  {(property.currentValue ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDCF(true)}
+                      className="w-full flex items-center justify-center gap-2 text-[11px] font-semibold text-brand-600 dark:text-brand-400 hover:text-white hover:bg-brand-600 dark:hover:bg-brand-700 border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 transition-colors"
+                    >
+                      <span>📊</span>
+                      <span>DCF Analysis — model implied appreciation</span>
+                      {property.dcfInputs && <span className="ml-auto text-[9px] bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-300 px-1.5 py-0.5 rounded-full">Last run saved</span>}
+                    </button>
+                  )}
                 </>
               )}
               {gain !== 0 && (
@@ -571,6 +931,15 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
         />
 
       </div>
+
+      {/* DCF Modal (portal-like, rendered inside card but covers screen) */}
+      {showDCF && (
+        <DCFModal
+          property={property}
+          onClose={() => setShowDCF(false)}
+          onCommit={handleDCFCommit}
+        />
+      )}
     </div>
   )
 }
@@ -585,6 +954,7 @@ function defaultProperty() {
     purchaseDate: '', purchasePrice: 0, currentValue: 0, appreciation: 3.5,
     propertyTax: 0, maintenancePct: 1.0, insurance: 0,
     isRental: false, rentalIncome: 0, vacancyRate: 5,
+    city: '', dcfInputs: null, appreciationBeforeDcf: null,
     mortgage: { enabled: false, lender: '', originalAmount: 0, balance: 0, rate: 5.25, amortizationMonths: 300, renewalDate: '', type: 'fixed' },
   }
 }
@@ -602,7 +972,12 @@ export default function RealEstateApp({ budget, onChange, darkMode, demoMode = f
   const upd = updated => onChange({ ...budget, properties: updated })
   const addProperty    = () => upd([...properties, defaultProperty()])
   const removeProperty = id => upd(properties.filter(p => p.id !== id))
-  const updateProperty = (id, f, v) => upd(properties.map(p => p.id === id ? { ...p, [f]: v } : p))
+  // Supports both (id, field, value) and (id, patchObject) forms
+  const updateProperty = (id, f, v) =>
+    upd(properties.map(p => p.id === id
+      ? (typeof f === 'object' && f !== null ? { ...p, ...f } : { ...p, [f]: v })
+      : p
+    ))
 
   const netMonthly = monthlyRentalIncome - totalMonthlyMortgagePayment - totalMonthlyPropertyCosts
   const ltv = totalPropertyValue > 0 ? Math.round(totalMortgageDebt / totalPropertyValue * 100) : 0
@@ -648,7 +1023,7 @@ export default function RealEstateApp({ budget, onChange, darkMode, demoMode = f
               key={property.id}
               property={property}
               readOnly={isDemo}
-              onUpdate={(f, v) => updateProperty(property.id, f, v)}
+              onUpdate={(f, v) => updateProperty(property.id, f, v)}  /* also accepts (patchObj) */
               onRemove={() => removeProperty(property.id)}
             />
           ))}
