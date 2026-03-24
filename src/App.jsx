@@ -23,11 +23,12 @@ import SequencingAdvisor  from './components/SequencingAdvisor.jsx'
 import EstateTab          from './components/EstateTab.jsx'
 import IncomeTargetPanel  from './components/IncomeTargetPanel.jsx'
 import AccountsApp        from './components/AccountsApp.jsx'
-import RealEstateApp     from './components/RealEstateApp.jsx'
+import RealEstateApp, { calcMortgagePayment, calcNetRentalIncome } from './components/RealEstateApp.jsx'
 import HelpApp           from './components/HelpApp.jsx'
 import ExpenseTracker     from './components/ExpenseTracker.jsx'
 import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
+import ScenarioCompare from './components/ScenarioCompare.jsx'
 import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
 
 const DEFAULT_INPUTS = {
@@ -248,6 +249,7 @@ const TABS = [
   { id: 'accChart',  label: 'Accumulation',          group: 'charts' },
   { id: 'cashChart',    label: 'Cashflow',        group: 'charts' },
   { id: 'estate',       label: 'Estate',          group: 'charts' },
+  { id: 'compare',      label: 'Compare',         group: 'charts' },
   { id: 'retTable',  label: 'Retirement Detailed',   group: 'tables' },
   { id: 'accTable',  label: 'Accumulation Detailed', group: 'tables' },
 ]
@@ -716,6 +718,59 @@ export default function App() {
     if (app === 'budget' && subTab) setBudgetTab(subTab)
   }
 
+  // ── Build simParams from any inputs+personConfigs pair (used by Compare tab) ──
+  const buildSimParamsForSnapshot = useCallback((snapInputs, snapPersonConfigs) => {
+    const pc = snapPersonConfigs?.primary ?? personConfigs.primary
+    const inp = snapInputs ?? inputs
+
+    const overrideAmt = pc.incomeTargetEnabled && pc.incomeTargetAmount > 0 ? pc.incomeTargetAmount : null
+    const strategyParams = {
+      ...pc.strategy.strategyParams,
+      inflation: (inp.inflation ?? 2) / 100,
+      ...(overrideAmt ? {
+        baseAmount:    overrideAmt,
+        annualExpense: overrideAmt,
+        rate: pc.strategy.strategyType === 'fixedPct' && overrideAmt > 0
+          ? overrideAmt / Math.max(1, (inp.accounts ?? []).reduce((s, a) => s + (a.balance ?? 0), 0))
+          : pc.strategy.strategyParams.rate,
+      } : {}),
+    }
+
+    const reProps = budget.properties ?? []
+    const annualNetRental = reProps.reduce((s, p) => s + calcNetRentalIncome(p) * 12, 0)
+    const reRetirementIncomes = annualNetRental > 0
+      ? [{ id: '_re_rental', label: 'Net Rental Income', amount: Math.round(annualNetRental), startAge: inp.retirementAge, endAge: inp.lifeExpectancy }]
+      : []
+    const reCashOutflows = { ...(pc.cashOutflows ?? {}) }
+    const ytr = Math.max(0, (inp.retirementAge ?? 65) - (inp.currentAge ?? 45))
+    reProps.forEach(p => {
+      const mort = p.mortgage
+      if (!mort?.enabled || !mort.balance || mort.balance <= 0 || !mort.amortizationMonths) return
+      const mPI = calcMortgagePayment(mort)
+      if (mPI <= 0) return
+      const mRem = Math.max(0, mort.amortizationMonths - ytr * 12)
+      for (let i = 0; i < Math.ceil(mRem / 12); i++) {
+        const age = (inp.retirementAge ?? 65) + i
+        reCashOutflows[age] = (reCashOutflows[age] ?? 0) + Math.round(mPI * 12)
+      }
+    })
+
+    return {
+      ...inp,
+      cashOutflows:        reCashOutflows,
+      cashOutflowTaxRates: pc.cashOutflowTaxRates ?? {},
+      cashInflows:         pc.retCashInflows ?? {},
+      strategyType:        pc.strategy.strategyType,
+      strategyParams,
+      rrspDrawdown:        pc.rrspDrawdown,
+      withdrawalSequence:  pc.withdrawalSequence ?? inp.withdrawalSequence,
+      scenarioShock:       null,
+      incomeTargetPhases:  pc.incomeTargetEnabled && pc.incomeTargetPhases?.length > 0 ? pc.incomeTargetPhases : null,
+      retirementIncomes:   [...(inp.retirementIncomes ?? []), ...reRetirementIncomes],
+      reProperties:        reProps,
+    }
+  }, [budget.properties, inputs, personConfigs])
+
   const allResults = useMemo(() => {
     try {
       const pPC = personConfigs.primary
@@ -735,9 +790,35 @@ export default function App() {
         } : {}),
       }
 
+      // ── Real estate injection into retirement simulation ────────────────────
+      const reProps = budget.properties ?? []
+
+      // 1. Net rental income → added as retirement income (reduces portfolio draw)
+      const annualNetRental = reProps.reduce((s, p) => s + calcNetRentalIncome(p) * 12, 0)
+      const reRetirementIncomes = annualNetRental > 0
+        ? [{ id: '_re_rental', label: 'Net Rental Income', amount: Math.round(annualNetRental), startAge: inputs.retirementAge, endAge: inputs.lifeExpectancy }]
+        : []
+
+      // 2. Mortgage P&I during retirement → added to cash outflows per retirement year
+      //    (only for mortgages that extend into retirement based on current amortization)
+      const reCashOutflows = { ...pPC.cashOutflows }
+      const yearsToRet = Math.max(0, inputs.retirementAge - inputs.currentAge)
+      reProps.forEach(p => {
+        const mort = p.mortgage
+        if (!mort?.enabled || !mort.balance || mort.balance <= 0 || !mort.amortizationMonths) return
+        const monthlyPI = calcMortgagePayment(mort)
+        if (monthlyPI <= 0) return
+        const monthsRemainingAtRet = Math.max(0, mort.amortizationMonths - yearsToRet * 12)
+        const retYearsWithMortgage = Math.ceil(monthsRemainingAtRet / 12)
+        for (let i = 0; i < retYearsWithMortgage; i++) {
+          const age = inputs.retirementAge + i
+          reCashOutflows[age] = (reCashOutflows[age] ?? 0) + Math.round(monthlyPI * 12)
+        }
+      })
+
       const simParams = {
         ...inputs,
-        cashOutflows:        pPC.cashOutflows,
+        cashOutflows:        reCashOutflows,
         cashOutflowTaxRates: pPC.cashOutflowTaxRates,
         cashInflows:         pPC.retCashInflows,
         strategyType:        pPC.strategy.strategyType,
@@ -746,6 +827,8 @@ export default function App() {
         withdrawalSequence:  pPC.withdrawalSequence ?? inputs.withdrawalSequence,
         scenarioShock:       (scenarioActive && !scenarioOverlay) ? effectiveScenario : null,
         incomeTargetPhases:  pPC.incomeTargetEnabled && pPC.incomeTargetPhases?.length > 0 ? pPC.incomeTargetPhases : null,
+        retirementIncomes:   [...(inputs.retirementIncomes ?? []), ...reRetirementIncomes],
+        reProperties:        reProps,
       }
 
       const primary = runSimulation(simParams)
@@ -1819,6 +1902,17 @@ export default function App() {
           {/* Estate tab */}
           {result && activeTab === 'estate' && (
             <EstateTab summary={result.summary} result={result} inputs={inputs} onInputChange={handleInputChange} />
+          )}
+
+          {/* Scenario comparison */}
+          {activeTab === 'compare' && (
+            <ScenarioCompare
+              snapshots={snapshots}
+              currentInputs={inputs}
+              currentPersonConfigs={personConfigs}
+              buildSimParams={buildSimParamsForSnapshot}
+              darkMode={darkMode}
+            />
           )}
 
           {/* Retirement Cashflow table */}
