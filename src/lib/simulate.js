@@ -177,8 +177,12 @@ export function buildAccumulationRows({
       }
     })
 
+    const BASE_TFSA = 7000
+    const tfsaScale = tfsaIndexedToInflation ? tfsaLimit / BASE_TFSA : 1
     const contribution        = isLastYear ? 0 : accounts.reduce((s, a) => {
-      const c = a.taxType === 'tfsa' ? Math.min(a.annualContribution, tfsaLimit) : a.annualContribution
+      const c = a.taxType === 'tfsa'
+        ? Math.min(Math.round(a.annualContribution * tfsaScale), tfsaLimit)
+        : a.annualContribution
       perAccountContrib[a.id] = isLastYear ? 0 : Math.round(c)
       return s + c
     }, 0)
@@ -206,14 +210,14 @@ export function buildAccumulationRows({
     })
 
     if (!isLastYear) {
-      // Apply returns + contributions (TFSA contributions capped at annual limit)
+      // Apply returns + contributions (TFSA contributions scaled by CPI when indexed)
       accounts.forEach((acc, i) => {
         const returnAmt      = balances[i] * (getAccReturnRate(acc) / 100)
         const afterTaxReturn = acc.taxType === 'nonreg'
           ? returnAmt * (1 - ordinaryFrac * margRate)
           : returnAmt
         const contrib = acc.taxType === 'tfsa'
-          ? Math.min(acc.annualContribution, tfsaLimit)
+          ? Math.min(Math.round(acc.annualContribution * tfsaScale), tfsaLimit)
           : acc.annualContribution
         balances[i] += afterTaxReturn + contrib
       })
