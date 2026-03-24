@@ -201,6 +201,8 @@ export function buildAccumulationRows({
       netGrowth:     Math.round(grossReturn - nonRegTaxDrag + contribution),
       cashInflow:    Math.round(cashInflow),
       cashOutflow:   Math.round(cashOutflowGross),
+      tfsaLimit,
+      tfsaIndexedToInflation,
     })
 
     if (!isLastYear) {

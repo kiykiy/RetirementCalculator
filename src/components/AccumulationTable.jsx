@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { InflowCell, OutflowCell } from './CashflowCells.jsx'
 import { AccAccountTooltip } from './DetailTable.jsx'
 
@@ -7,6 +7,56 @@ function fmt(n) {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (Math.abs(n) >= 1_000)    return `$${Math.round(n / 1_000)}K`
   return `$${n.toLocaleString()}`
+}
+
+function ContribTooltip({ row, accounts }) {
+  const [show, setShow] = useState(false)
+  const timer = useRef(null)
+  const enter = () => { clearTimeout(timer.current); setShow(true) }
+  const leave = () => { timer.current = setTimeout(() => setShow(false), 250) }
+
+  if (row.contribution <= 0) return <span>—</span>
+
+  const hasTfsa = accounts.some(a => a.taxType === 'tfsa')
+
+  return (
+    <div className="relative inline-block" onMouseEnter={enter} onMouseLeave={leave}>
+      <span className="cursor-default">{fmt(row.contribution)}</span>
+      {show && (
+        <div
+          className="absolute left-0 bottom-full mb-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl shadow-lg p-3 w-60 text-xs space-y-0.5"
+          onMouseEnter={enter} onMouseLeave={leave}
+        >
+          <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1.5">Contributions — Age {row.age}</p>
+          {accounts.map(acc => {
+            const c = row.perAccountContrib?.[acc.id] ?? 0
+            if (c <= 0) return null
+            const isTfsa = acc.taxType === 'tfsa'
+            const capped = isTfsa && row.tfsaLimit && acc.annualContribution > row.tfsaLimit
+            return (
+              <div key={acc.id} className="flex justify-between items-start">
+                <span className="text-gray-500 dark:text-gray-400">
+                  {acc.name}
+                  {capped && <span className="text-amber-500 text-[10px] ml-1">capped</span>}
+                </span>
+                <span className="tabular-nums font-medium text-brand-600 dark:text-brand-400">${c.toLocaleString()}</span>
+              </div>
+            )
+          })}
+          <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200 pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
+            <span>Total</span>
+            <span className="tabular-nums">${row.contribution.toLocaleString()}</span>
+          </div>
+          {hasTfsa && row.tfsaLimit && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 pt-1.5 leading-relaxed">
+              TFSA limit: ${row.tfsaLimit.toLocaleString()}/yr
+              {row.tfsaIndexedToInflation ? ' · indexed to CPI' : ' · fixed (not indexed)'}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function AccumulationTable({
@@ -108,7 +158,9 @@ export default function AccumulationTable({
                   </td>
                 ))}
                 <td className="py-2 px-2 whitespace-nowrap font-medium dark:text-gray-300">{fmt(row.totalBalance)}</td>
-                <td className="py-2 px-2 whitespace-nowrap text-brand-700 dark:text-brand-400">{row.contribution > 0 ? fmt(row.contribution) : '—'}</td>
+                <td className="py-2 px-2 whitespace-nowrap text-brand-700 dark:text-brand-400">
+                  <ContribTooltip row={row} accounts={accounts} />
+                </td>
                 <td className="py-2 px-2 whitespace-nowrap">
                   <InflowCell
                     age={row.age}

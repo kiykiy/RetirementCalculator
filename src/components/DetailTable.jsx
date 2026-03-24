@@ -184,8 +184,14 @@ function AccAccountTooltip({ row, acc, accounts, accCashInflows, accCashOutflows
     ? Math.round(row.nonRegTaxDrag * (balance / Math.max(1, accounts.filter(a => a.taxType === 'nonreg').reduce((s, a) => s + (row.accountBalances?.[a.id] ?? 0), 0))))
     : 0
 
+  // TFSA: show if contribution was capped at indexed limit
+  const tfsaCapped = acc.taxType === 'tfsa' && row.tfsaLimit && acc.annualContribution > row.tfsaLimit
+  const tfsaContribLabel = acc.taxType === 'tfsa' && row.tfsaLimit
+    ? `Contribution (cap $${row.tfsaLimit.toLocaleString()}${row.tfsaIndexedToInflation ? ' CPI' : ''})`
+    : 'Annual Contribution'
+
   const lines = [
-    accContrib > 0 && { label: 'Annual Contribution', value: accContrib, color: 'text-brand-600 dark:text-brand-400' },
+    accContrib > 0 && { label: tfsaContribLabel, value: accContrib, color: 'text-brand-600 dark:text-brand-400' },
     accReturn > 0 && { label: `Return (${returnRate}%)`, value: accReturn, color: 'text-emerald-600 dark:text-emerald-400' },
     accTaxDrag > 0 && { label: 'Tax Drag', value: -accTaxDrag, color: 'text-amber-600 dark:text-amber-400' },
     accInflow > 0 && { label: 'Cash Inflow', value: accInflow, color: 'text-green-600 dark:text-green-400' },
@@ -212,6 +218,15 @@ function AccAccountTooltip({ row, acc, accounts, accCashInflows, accCashOutflows
             <span>Balance</span>
             <span className="tabular-nums">{fmtFull(balance)}</span>
           </div>
+          {acc.taxType === 'tfsa' && row.tfsaLimit && (
+            <p className="text-[10px] text-gray-400 dark:text-gray-500 pt-1.5 leading-relaxed">
+              TFSA limit: ${row.tfsaLimit.toLocaleString()}/yr
+              {row.tfsaIndexedToInflation ? ' (indexed to CPI)' : ' (fixed)'}
+              {tfsaCapped && (
+                <span className="text-amber-500"> · Set ${acc.annualContribution.toLocaleString()}, capped at limit</span>
+              )}
+            </p>
+          )}
         </div>
       )}
     </div>
