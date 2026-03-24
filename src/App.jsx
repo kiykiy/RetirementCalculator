@@ -1324,13 +1324,29 @@ export default function App() {
 
 
               {/* DEMO mode toggle */}
-              <div className="flex items-center gap-1.5 select-none px-1">
+              <div className="flex items-center gap-1.5 select-none px-1 group relative">
                 <span className={`text-[9px] font-semibold tracking-wide transition-colors ${demoMode ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 dark:text-gray-500'}`}>DEMO</span>
                 <button type="button" onClick={() => setDemoMode(v => !v)}
-                  title="Toggle demo data"
                   className={`relative inline-flex h-3.5 w-6 flex-shrink-0 rounded-full transition-colors focus:outline-none ${demoMode ? 'bg-amber-400' : 'bg-gray-200 dark:bg-gray-700'}`}>
                   <span className={`inline-block h-2.5 w-2.5 mt-[1px] rounded-full bg-white shadow transform transition-transform ${demoMode ? 'translate-x-2.5' : 'translate-x-0.5'}`} />
                 </button>
+                {/* Tooltip */}
+                <div className="pointer-events-none absolute top-full right-0 mt-2 w-72 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <div className="bg-gray-900 dark:bg-gray-800 text-white text-[11px] rounded-xl shadow-xl p-3.5 space-y-2.5 leading-relaxed">
+                    <p className="font-semibold text-amber-400">Demo Mode</p>
+                    <p className="text-gray-300">Loads a full set of realistic sample data so you can explore the app without entering your own information.</p>
+                    <div className="space-y-1.5 border-t border-gray-700 pt-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">What gets populated</p>
+                      <div className="space-y-1 text-[11px]">
+                        <p><span className="text-amber-400 font-medium">Retirement</span> — profile (Alex, age 45, ON), RRSP/TFSA/non-reg balances, CPP &amp; OAS settings, 4% withdrawal strategy</p>
+                        <p><span className="text-amber-400 font-medium">Budget</span> — monthly income &amp; expense categories, big purchase reserve items (home, car, computer)</p>
+                        <p><span className="text-amber-400 font-medium">Accounts</span> — chequing, savings, credit card, mortgage, RRSP, TFSA and non-reg accounts with balances</p>
+                        <p><span className="text-amber-400 font-medium">Real Estate</span> — sample primary residence with mortgage, appreciation rate &amp; property details</p>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-gray-500">Your own saved data is preserved — toggling Demo off restores it.</p>
+                  </div>
+                </div>
               </div>
 
               {/* Reset button */}
