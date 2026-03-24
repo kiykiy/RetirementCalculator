@@ -961,8 +961,8 @@ function defaultProperty() {
 
 export default function RealEstateApp({ budget, onChange, darkMode, demoMode = false }) {
   const properties = budget.properties ?? []
-  const displayProperties = demoMode && properties.length === 0 ? DEMO_PROPERTIES : properties
-  const isDemo = demoMode && properties.length === 0
+  const displayProperties = demoMode ? DEMO_PROPERTIES : properties
+  const isDemo = demoMode
 
   const {
     totalPropertyValue, totalMortgageDebt, totalRealEstateEquity,
