@@ -117,11 +117,13 @@ function AccountTooltip({ row, type }) {
     const other = row.otherPension ?? 0
     const cg  = row.capitalGain ?? 0
     const cgTaxable = Math.round(cg * 0.5)
+    const ordNR = row.ordinaryNonReg ?? 0
     const nonRegFull = row.nonRegWithdrawn ?? 0
     const tfsaWd = row.tfsaWithdrawn ?? 0
     lines = [
       rrif > 0     && { label: 'RRIF (100% taxable)', value: rrif, color: 'text-red-500 dark:text-red-400' },
       cgTaxable > 0 && { label: 'Non-Reg cap gains (50%)', value: cgTaxable, color: 'text-amber-600 dark:text-amber-400' },
+      ordNR > 0    && { label: 'Non-Reg interest/dividends', value: ordNR, color: 'text-amber-600 dark:text-amber-400' },
       cpp > 0      && { label: 'CPP', value: cpp, color: 'text-blue-600 dark:text-blue-400' },
       oas > 0      && { label: 'OAS (net of clawback)', value: oas, color: 'text-blue-600 dark:text-blue-400' },
       db > 0       && { label: 'DB Pension', value: db, color: 'text-emerald-600 dark:text-emerald-400' },
@@ -131,7 +133,7 @@ function AccountTooltip({ row, type }) {
     // Excluded items note
     const excluded = []
     if (tfsaWd > 0) excluded.push(`TFSA $${Math.round(tfsaWd).toLocaleString()} (tax-free)`)
-    if (nonRegFull > 0 && cg > 0) excluded.push(`Non-Reg 50% CG exclusion $${Math.round(cg * 0.5).toLocaleString()}`)
+    if (cg > 0) excluded.push(`Non-Reg 50% CG exclusion $${Math.round(cg * 0.5).toLocaleString()}`)
     lines._note = 'Taxable income only — determines your tax bracket. TFSA withdrawals and the non-taxable portion of Non-Reg are excluded.'
     if (excluded.length > 0) lines._excluded = `Not included: ${excluded.join('; ')}`
   }

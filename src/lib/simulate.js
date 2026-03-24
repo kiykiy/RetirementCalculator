@@ -681,6 +681,7 @@ export function runSimulation(inputs) {
       nonRegToTfsaTax,
       nonRegToTfsaNet,
       capitalGain:     Math.round(capitalGainRealized),
+      ordinaryNonReg:  Math.round(ordinaryNonReg),
       grossIncome:     Math.round(grossIncome),
       federalTax:      taxResult.federal,
       provincialTax:   taxResult.provincial,
