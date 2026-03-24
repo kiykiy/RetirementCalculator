@@ -1523,10 +1523,14 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
+  const activeLabel = NAV_ITEMS.find(i => i.key === active)?.label
+
   return (
     <>
       {/* ── Nav column ─────────────────────────────────────────────────────────── */}
-      <nav className="w-36 flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 h-full">
+      {/* On mobile: when a submenu is active, the nav hides and the submenu fills the space inline */}
+      <nav className={`flex-shrink-0 flex flex-col border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 h-full transition-all
+        ${isMobile && active ? 'w-0 overflow-hidden border-r-0' : 'w-36'}`}>
         <div className="flex-1 overflow-y-auto py-1 sidebar-scroll">
           {NAV_ITEMS.map((item, i) => item.divider ? (
             <div key={`divider-${i}`} className="px-4 pt-3 pb-1">
@@ -1559,30 +1563,53 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
         </div>
       </nav>
 
-      {/* ── Submenu panel (portal) ───────────────────────────────────────────────── */}
-      {active && createPortal(
-        (() => {
-          const label = NAV_ITEMS.find(i => i.key === active)?.label
+      {/* ── Mobile inline submenu (replaces nav, no portal needed) ───────────────── */}
+      {isMobile && active && (
+        <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 h-full min-w-0">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
+            <button
+              onClick={() => setActive(null)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </button>
+            <p className="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">{activeLabel}</p>
+            {active === 'accounts' && (
+              <button
+                onClick={addAccount}
+                className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors text-sm font-medium"
+                title="Add account"
+              >+</button>
+            )}
+          </div>
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto sidebar-scroll p-4 space-y-3">
+            {sectionContent[active]}
+          </div>
+        </div>
+      )}
 
-          /* ── Shared header ── */
-          const header = (
+      {/* ── Desktop floating card (portal) ───────────────────────────────────────── */}
+      {!isMobile && active && createPortal(
+        <div
+          className="overlay-panel"
+          style={{
+            position:  'fixed',
+            top:       cardPos.top,
+            left:      cardPos.left,
+            width:     NAV_ITEMS.find(i => i.key === active)?.cardWidth ?? 280,
+            maxHeight: cardPos.maxH,
+            zIndex:    40,
+          }}
+        >
+          <div className="card !p-3 shadow-xl">
             <div className="flex items-center justify-between mb-2">
-              {isMobile ? (
-                /* Mobile: ← back button on the left */
-                <button
-                  onClick={() => setActive(null)}
-                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100 transition-colors"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                  Back
-                </button>
-              ) : (
-                active !== 'cppoas'
-                  ? <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">{label}</p>
-                  : <span />
-              )}
+              {active !== 'cppoas'
+                ? <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">{activeLabel}</p>
+                : <span />}
               <div className="flex items-center gap-1">
                 {active === 'accounts' && (
                   <button
@@ -1591,89 +1618,23 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
                     title="Add account"
                   >+</button>
                 )}
-                {!isMobile && (
-                  <button
-                    onClick={() => setActive(null)}
-                    className="w-5 h-5 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
-                    title="Close"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          )
-
-          if (isMobile) {
-            /* ── Mobile: full-screen left-anchored drawer ── */
-            return (
-              <div
-                className="overlay-panel"
-                style={{ position: 'fixed', inset: 0, zIndex: 50 }}
-              >
-                {/* Backdrop */}
-                <div
-                  className="absolute inset-0 bg-black/30 backdrop-blur-[1px]"
+                <button
                   onClick={() => setActive(null)}
-                />
-                {/* Panel slides in from left */}
-                <div
-                  className="absolute top-0 left-0 h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col"
-                  style={{ width: 'min(88vw, 360px)' }}
+                  className="w-5 h-5 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-300 transition-colors"
+                  title="Close"
                 >
-                  {/* Title bar */}
-                  <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex-shrink-0">
-                    <button
-                      onClick={() => setActive(null)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</p>
-                    {active === 'accounts' && (
-                      <button
-                        onClick={addAccount}
-                        className="ml-auto w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors text-sm font-medium"
-                        title="Add account"
-                      >+</button>
-                    )}
-                  </div>
-                  {/* Scrollable content */}
-                  <div className="flex-1 overflow-y-auto sidebar-scroll p-4 space-y-3">
-                    {sectionContent[active]}
-                  </div>
-                </div>
-              </div>
-            )
-          }
-
-          /* ── Desktop: original floating card ── */
-          return (
-            <div
-              className="overlay-panel"
-              style={{
-                position:  'fixed',
-                top:       cardPos.top,
-                left:      cardPos.left,
-                width:     NAV_ITEMS.find(i => i.key === active)?.cardWidth ?? 280,
-                maxHeight: cardPos.maxH,
-                zIndex:    40,
-              }}
-            >
-              <div className="card !p-3 shadow-xl">
-                {header}
-                <div className="overflow-y-auto sidebar-scroll space-y-2"
-                  style={{ maxHeight: typeof cardPos.maxH === 'number' ? cardPos.maxH - 52 : 'calc(100vh - 132px)' }}>
-                  {sectionContent[active]}
-                </div>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
               </div>
             </div>
-          )
-        })(),
+            <div className="overflow-y-auto sidebar-scroll space-y-2"
+              style={{ maxHeight: typeof cardPos.maxH === 'number' ? cardPos.maxH - 52 : 'calc(100vh - 132px)' }}>
+              {sectionContent[active]}
+            </div>
+          </div>
+        </div>,
         document.body
       )}
     </>
