@@ -1907,6 +1907,21 @@ export default function App() {
             pensionSplitSaving={viewPerson === 'combined' ? (allResults.combined?.summary?.totalPensionSplitSaving ?? null) : null}
           />}
 
+          {/* Assumptions pills (collapsible, above tabs) */}
+          {result && activeApp === 'retirement' && (
+            <AssumptionsPills
+              inputs={inputs}
+              onOpenSection={(section) => {
+                if (isMobileScreen) {
+                  setOpenSection(section)
+                  setMobileInputsOpen(true)
+                } else {
+                  setOpenSection(section)
+                }
+              }}
+            />
+          )}
+
           {/* Tab switcher */}
           {result && (
             <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit max-w-full overflow-x-auto">
@@ -1928,21 +1943,6 @@ export default function App() {
                 </React.Fragment>
               ))}
             </div>
-          )}
-
-          {/* Assumptions pills */}
-          {result && activeApp === 'retirement' && (
-            <AssumptionsPills
-              inputs={inputs}
-              onOpenSection={(section) => {
-                if (isMobileScreen) {
-                  setOpenSection(section)
-                  setMobileInputsOpen(true)
-                } else {
-                  setOpenSection(section)
-                }
-              }}
-            />
           )}
 
           {/* Accumulation Portfolio chart */}
