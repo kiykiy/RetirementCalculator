@@ -77,7 +77,7 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
     <div className="relative flex items-center">
       {showSteppers && (
         <button type="button" tabIndex={-1} onClick={() => stepBy(-step)}
-          className="absolute left-0.5 z-10 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-sm font-medium select-none"
+          className="absolute left-0.5 z-10 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors text-sm font-medium select-none"
           aria-label="Decrease">−</button>
       )}
       {prefix && !showSteppers && <span className="absolute left-2.5 text-gray-400 text-xs select-none">{prefix}</span>}
@@ -86,7 +86,7 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
         id={id}
         type="text"
         inputMode={isPct ? 'decimal' : 'numeric'}
-        className={`input-field text-xs py-1.5 ${showSteppers ? 'px-8 text-center tabular-nums' : prefix ? 'pl-6' : ''} ${suffix && !showSteppers ? 'pr-8' : ''} ${className}`}
+        className={`input-field text-xs py-1.5 ${showSteppers ? 'px-6 text-center tabular-nums' : prefix ? 'pl-6' : ''} ${suffix && !showSteppers ? 'pr-8' : ''} ${className}`}
         value={local}
         onChange={handleChange}
         onFocus={handleFocus}
@@ -96,7 +96,7 @@ function NumberInput({ id, value, onChange, min, max, step = 1, prefix, suffix, 
       {suffix && !showSteppers && <span className="absolute right-2.5 text-gray-400 text-xs select-none">{suffix}</span>}
       {showSteppers && (
         <button type="button" tabIndex={-1} onClick={() => stepBy(step)}
-          className="absolute right-0.5 z-10 w-7 h-7 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-sm font-medium select-none"
+          className="absolute right-0.5 z-10 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors text-sm font-medium select-none"
           aria-label="Increase">+</button>
       )}
     </div>
