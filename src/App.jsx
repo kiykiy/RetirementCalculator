@@ -1356,10 +1356,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Reset button */}
+              {/* Reset button — hidden on mobile, moved into profile menu */}
               <button
                 onClick={() => { if (window.confirm('Reset all data to defaults?')) { resetToDefaults(); setProfileOpen(false) } }}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 title="Reset all to defaults"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -1367,10 +1367,10 @@ export default function App() {
                 </svg>
               </button>
 
-              {/* Dark mode toggle */}
+              {/* Dark mode toggle — hidden on mobile, moved into profile menu */}
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 title={darkMode ? 'Light mode' : 'Dark mode'}
               >
                 {darkMode ? (
@@ -1437,9 +1437,44 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                        <div className="p-2">
+                        <div className="p-2 space-y-0.5">
+                          {/* Mobile-only: Dark mode toggle */}
+                          {isMobileScreen && (
+                            <button
+                              onClick={() => { setDarkMode(!darkMode) }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
+                            >
+                              {darkMode ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                                </svg>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                                </svg>
+                              )}
+                              {darkMode ? 'Light mode' : 'Dark mode'}
+                            </button>
+                          )}
+                          {/* Mobile-only: Snapshots (retirement tab) */}
+                          {isMobileScreen && activeApp === 'retirement' && (
+                            <div className="px-1">
+                              <SnapshotsPanel
+                                snapshots={snapshots}
+                                activeSnapshotName={activeSnapshotName}
+                                onSave={name => { saveSnapshot(name, { inputs, personConfigs }); setActiveSnapshotName(name || `Snapshot ${new Date().toLocaleDateString()}`) }}
+                                onLoad={(data, name) => {
+                                  if (data.inputs) setInputs(mergeInputs(data.inputs))
+                                  setPersonConfigs(loadPersonConfigs(data))
+                                  setActiveSnapshotName(name)
+                                }}
+                                onDelete={deleteSnapshot}
+                                onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
+                              />
+                            </div>
+                          )}
                           <button
-                            onClick={() => { resetToDefaults(); setProfileOpen(false) }}
+                            onClick={() => { if (window.confirm('Reset all data to defaults?')) { resetToDefaults(); setProfileOpen(false) } }}
                             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -1460,8 +1495,54 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      /* Guest: show login form as inline card */
-                      <AuthModal onClose={() => setProfileOpen(false)} />
+                      /* Guest: show login form + mobile-only actions */
+                      <>
+                        <AuthModal onClose={() => setProfileOpen(false)} />
+                        {isMobileScreen && (
+                          <div className="p-2 border-t border-gray-100 dark:border-gray-800 space-y-0.5">
+                            <button
+                              onClick={() => setDarkMode(!darkMode)}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
+                            >
+                              {darkMode ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                                </svg>
+                              ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                                </svg>
+                              )}
+                              {darkMode ? 'Light mode' : 'Dark mode'}
+                            </button>
+                            {activeApp === 'retirement' && (
+                              <div className="px-1">
+                                <SnapshotsPanel
+                                  snapshots={snapshots}
+                                  activeSnapshotName={activeSnapshotName}
+                                  onSave={name => { saveSnapshot(name, { inputs, personConfigs }); setActiveSnapshotName(name || `Snapshot ${new Date().toLocaleDateString()}`) }}
+                                  onLoad={(data, name) => {
+                                    if (data.inputs) setInputs(mergeInputs(data.inputs))
+                                    setPersonConfigs(loadPersonConfigs(data))
+                                    setActiveSnapshotName(name)
+                                  }}
+                                  onDelete={deleteSnapshot}
+                                  onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
+                                />
+                              </div>
+                            )}
+                            <button
+                              onClick={() => { if (window.confirm('Reset all data to defaults?')) { resetToDefaults(); setProfileOpen(false) } }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors dark:text-gray-400 dark:hover:bg-gray-800"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                              </svg>
+                              Reset all to defaults
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
