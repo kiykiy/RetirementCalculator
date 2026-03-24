@@ -2855,7 +2855,10 @@ function DashboardTab({
       {/* ── 4. CASH FLOW CHART ── */}
       <div className="card">
         <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-          <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-gray-900 dark:text-gray-100">Cash Flow</h3>
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400">Planned</span>
+          </div>
           <div className="flex items-center gap-3">
             {/* Year navigator */}
             <div className="flex items-center gap-1">
