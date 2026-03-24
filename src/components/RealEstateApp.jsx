@@ -130,18 +130,43 @@ function runDCF(inputs) {
 // ─── Demo Data ────────────────────────────────────────────────────────────────
 const DEMO_PROPERTIES = [
   {
-    id: 'demo_re1', name: 'Primary Residence', type: 'primary',
-    purchaseDate: '2018-06-15', purchasePrice: 550000, currentValue: 750000, appreciation: 3.5,
-    propertyTax: 6200, maintenancePct: 1.0, insurance: 1800,
+    id: 'demo_re1', name: '42 Maple Ridge Dr', type: 'primary',
+    city: 'Toronto, ON',
+    purchaseDate: '2017-09-01', purchasePrice: 820000, currentValue: 1175000, appreciation: 7.0,
+    propertyTax: 8400, maintenancePct: 0.9, insurance: 2200,
     isRental: false, rentalIncome: 0, vacancyRate: 5,
-    mortgage: { enabled: true, lender: 'TD Canada Trust', originalAmount: 480000, balance: 412500, rate: 5.09, amortizationMonths: 252, renewalDate: '2027-06', type: 'fixed' },
+    appreciationBeforeDcf: null, dcfInputs: null,
+    mortgage: {
+      enabled: true, lender: 'RBC Royal Bank', originalAmount: 656000,
+      balance: 541200, rate: 5.34, amortizationMonths: 228,
+      renewalDate: '2027-09', type: 'fixed',
+    },
   },
   {
-    id: 'demo_re2', name: 'Rental Condo', type: 'rental',
-    purchaseDate: '2021-03-01', purchasePrice: 420000, currentValue: 480000, appreciation: 3.0,
-    propertyTax: 3800, maintenancePct: 0.8, insurance: 900,
-    isRental: true, rentalIncome: 2200, vacancyRate: 5,
-    mortgage: { enabled: true, lender: 'Scotiabank', originalAmount: 350000, balance: 322000, rate: 5.44, amortizationMonths: 288, renewalDate: '2026-03', type: 'variable' },
+    id: 'demo_re2', name: 'Lakeview Condo #804', type: 'rental',
+    city: 'Hamilton, ON',
+    purchaseDate: '2020-05-15', purchasePrice: 465000, currentValue: 545000, appreciation: 5.5,
+    propertyTax: 4200, maintenancePct: 0.7, insurance: 1050,
+    isRental: true, rentalIncome: 2450, vacancyRate: 4,
+    appreciationBeforeDcf: null, dcfInputs: null,
+    mortgage: {
+      enabled: true, lender: 'Scotiabank', originalAmount: 372000,
+      balance: 341800, rate: 5.69, amortizationMonths: 276,
+      renewalDate: '2025-11', type: 'variable',
+    },
+  },
+  {
+    id: 'demo_re3', name: 'Blue Mountain Chalet', type: 'vacation',
+    city: 'Barrie, ON',
+    purchaseDate: '2022-02-28', purchasePrice: 680000, currentValue: 720000, appreciation: 5.0,
+    propertyTax: 5600, maintenancePct: 1.2, insurance: 3100,
+    isRental: true, rentalIncome: 3800, vacancyRate: 30,
+    appreciationBeforeDcf: null, dcfInputs: null,
+    mortgage: {
+      enabled: true, lender: 'TD Canada Trust', originalAmount: 510000,
+      balance: 493000, rate: 5.89, amortizationMonths: 300,
+      renewalDate: '2027-02', type: 'fixed',
+    },
   },
 ]
 

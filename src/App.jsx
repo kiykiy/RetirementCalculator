@@ -397,6 +397,7 @@ export default function App() {
   const [scenarioHovered,      setScenarioHovered]      = useState(false)
   const [scenarioActive,       setScenarioActive]       = useState(false)
   const [mobileInputsOpen,     setMobileInputsOpen]     = useState(false)
+  const [sideNavOpen,          setSideNavOpen]          = useState(false)
   const [scenarioOverlay,      setScenarioOverlay]      = useState(false)
   const [scenarioLockRetirement, setScenarioLockRetirement] = useState(false)
   const [scenarioSliders,      setScenarioSliders]      = useState({ returnDelta: 0, inflationDelta: 0, startAge: 75, durationYears: 1 })
@@ -968,10 +969,21 @@ export default function App() {
   const handleAccOutflowTaxRateChange= useCallback((age, rate)   => setAccOutflowTaxRates(p  => ({ ...p, [age]: rate })), [])
 
   return (
-    <div className="h-screen flex bg-gray-100 dark:bg-gray-950 p-3 gap-3 overflow-hidden">
+    <div className="h-screen bg-gray-100 dark:bg-gray-950 p-3 overflow-hidden">
 
-      {/* ── Left app launcher rail (outside the rounded border) ── */}
-      <div className="flex-shrink-0 flex flex-col items-center py-3 gap-3">
+      {/* ── Mobile sidebar backdrop ── */}
+      {sideNavOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 sm:hidden"
+          onClick={() => setSideNavOpen(false)}
+        />
+      )}
+
+      {/* ── Left app launcher rail — fixed overlay ── */}
+      <div className={`fixed left-3 top-3 bottom-3 z-40 flex flex-col items-center py-3 gap-3
+        transition-transform duration-200
+        ${sideNavOpen ? 'translate-x-0' : '-translate-x-full sm:translate-x-0'}
+      `}>
 
         {/* Forward Planner >> logo */}
         <div className="w-9 h-9 rounded-xl bg-gray-900 dark:bg-white flex items-center justify-center flex-shrink-0 shadow-sm" title="Forward Planner">
@@ -983,7 +995,7 @@ export default function App() {
 
         {/* R — Retirement app */}
         <button
-          onClick={() => setActiveApp('retirement')}
+          onClick={() => { setActiveApp('retirement'); setSideNavOpen(false) }}
           title="Retirement Planner"
           className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
             ${activeApp === 'retirement'
@@ -996,7 +1008,7 @@ export default function App() {
 
         {/* B — Budget app */}
         <button
-          onClick={() => setActiveApp('budget')}
+          onClick={() => { setActiveApp('budget'); setSideNavOpen(false) }}
           title="Budget Planner"
           className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
             ${activeApp === 'budget'
@@ -1009,7 +1021,7 @@ export default function App() {
 
         {/* T — Transactions */}
         <button
-          onClick={() => setActiveApp('tracking')}
+          onClick={() => { setActiveApp('tracking'); setSideNavOpen(false) }}
           title="Transactions"
           className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
             ${activeApp === 'tracking'
@@ -1022,7 +1034,7 @@ export default function App() {
 
         {/* A — Accounts app */}
         <button
-          onClick={() => setActiveApp('accounts')}
+          onClick={() => { setActiveApp('accounts'); setSideNavOpen(false) }}
           title="Accounts"
           className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
             ${activeApp === 'accounts'
@@ -1035,7 +1047,7 @@ export default function App() {
 
         {/* P — Real Estate app */}
         <button
-          onClick={() => setActiveApp('realestate')}
+          onClick={() => { setActiveApp('realestate'); setSideNavOpen(false) }}
           title="Real Estate"
           className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black tracking-tight transition-all duration-150 shadow-sm
             ${activeApp === 'realestate'
@@ -1052,7 +1064,7 @@ export default function App() {
 
         {/* ? — Help & Audit Log */}
         <button
-          onClick={() => setActiveApp('help')}
+          onClick={() => { setActiveApp('help'); setSideNavOpen(false) }}
           title="Help & Audit Log"
           className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm transition-all duration-150 shadow-sm
             ${activeApp === 'help'
@@ -1065,12 +1077,23 @@ export default function App() {
 
       </div>
 
-      {/* ── App container (rounded border) ── */}
-      <div className="flex-1 min-w-0 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden flex flex-col">
+      {/* ── App container (rounded border) — offset right of fixed sidebar on sm+ ── */}
+      <div className="h-full sm:ml-12 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm overflow-hidden flex flex-col">
 
         {/* ── Header ── */}
         <header className="bg-white border-b border-gray-100 dark:bg-gray-900 dark:border-gray-800 flex-shrink-0 z-30">
           <div className="px-4 sm:px-6 h-14 flex items-center gap-3">
+
+            {/* Hamburger — mobile only, opens sidebar overlay */}
+            <button
+              onClick={() => setSideNavOpen(true)}
+              className="sm:hidden w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
+              title="Menu"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
 
             {/* Left: title + (budget tabs inline) */}
             <div className="flex items-center gap-3 flex-1 min-w-0 self-stretch">
@@ -1838,9 +1861,9 @@ export default function App() {
 
       {/* ── Mobile Inputs Drawer ─────────────────────────────────────────────── */}
       {mobileInputsOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-50 flex">
           {/* Backdrop */}
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileInputsOpen(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileInputsOpen(false)} />
           {/* Drawer panel */}
           <div className="relative ml-auto w-full max-w-sm h-full bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden">
             {/* Drawer header */}
