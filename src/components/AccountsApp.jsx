@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { calcTfsaLimit, getMixStats, ASSET_CLASSES } from '../lib/simulate.js'
 import { classifyPlaidAccount, debtTypeFromPlaid } from './PlaidConnect.jsx'
 import { formatWhileEditing, parseFormatted, handleArrowKeys, flashCommit } from '../lib/inputHelpers.js'
+import { calcMortgagePayment } from './RealEstateApp.jsx'
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -417,7 +418,6 @@ const DEBT_TYPES = [
   { value: 'credit_card', label: 'Credit Card'      },
   { value: 'loc',         label: 'Line of Credit'   },
   { value: 'loan',        label: 'Personal Loan'    },
-  { value: 'mortgage',    label: 'Mortgage'         },
   { value: 'student',     label: 'Student Loan'     },
   { value: 'auto',        label: 'Auto Loan'        },
   { value: 'other',       label: 'Other'            },
@@ -490,6 +490,50 @@ function DebtAccountCard({ acc, onUpdate, onRemove, demoMode = false, demoBankId
       )}
 
       <PlaidAccountBadge acc={acc} onUpdate={(f, v) => onUpdate(f, v)} demoMode={demoMode} demoBankIdx={demoBankIdx} />
+      </div>
+    </div>
+  )
+}
+
+// ─── Mortgage Card (auto-populated from Real Estate) ─────────────────────────
+
+function MortgageDebtCard({ property, onGoToRealEstate }) {
+  const m = property.mortgage
+  const payment = calcMortgagePayment(m.balance ?? 0, m.rate ?? 0, m.amortizationMonths ?? 300)
+
+  return (
+    <div className="border border-rose-100 dark:border-rose-900/40 rounded-xl overflow-hidden bg-white dark:bg-gray-800/50">
+      <div className="h-1 bg-rose-400" />
+      <div className="p-3 space-y-2">
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-medium text-gray-700 dark:text-gray-300 flex-1 truncate">{property.name}</p>
+          <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded-full flex-shrink-0">🏠 RE</span>
+        </div>
+        <p className="text-[10px] text-gray-400 dark:text-gray-500">Mortgage · {m.lender || 'No lender'} · {m.type ?? 'fixed'}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="label">Balance</label>
+            <p className="text-sm font-semibold text-rose-600 dark:text-rose-400 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">${(m.balance ?? 0).toLocaleString()}</p>
+          </div>
+          <div>
+            <label className="label">Rate</label>
+            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 tabular-nums bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg px-2.5 py-1.5">{m.rate ?? 0}%</p>
+          </div>
+        </div>
+        {payment > 0 && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-rose-50 dark:bg-rose-900/20 px-2.5 py-1.5">
+            <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold tabular-nums">
+              ${Math.round(payment).toLocaleString()}/mo P&I
+            </p>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => onGoToRealEstate?.()}
+          className="w-full text-[10px] text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors text-center py-0.5"
+        >
+          Manage in 🏠 tab →
+        </button>
       </div>
     </div>
   )
@@ -631,7 +675,8 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
 
   const accBal = a => a.subAccounts?.length > 0 ? a.subAccounts.reduce((s, sa) => s + (sa.balance ?? 0), 0) : (a.balance ?? 0)
   const totalCash = cashAccounts.reduce((s, a) => s + accBal(a), 0)
-  const totalDebt = debtAccounts.reduce((s, a) => s + (a.balance ?? 0), 0)
+  const reMortgageDebt = (budget.properties ?? []).filter(p => p.mortgage?.enabled).reduce((s, p) => s + (p.mortgage?.balance ?? 0), 0)
+  const totalDebt = debtAccounts.reduce((s, a) => s + (a.balance ?? 0), 0) + reMortgageDebt
   const totalInv  = investmentAccounts.reduce((s, a) => s + accBal(a), 0)
   const totalRet        = retAccounts.reduce((s, a) => s + (a.balance ?? 0), 0)
   const totalOtherValue = otherAssets.reduce((s, a) => s + (a.value ?? 0), 0)
@@ -796,32 +841,41 @@ export default function AccountsApp({ inputs, onInputsChange, budget, onBudgetCh
         <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">
           Money you owe. The monthly interest cost is shown on each card so you can see which debts cost the most.
         </p>
-        {debtAccounts.length === 0 ? (
-          <button onClick={addDebt}
-            className="rounded-xl border border-dashed border-rose-200 dark:border-rose-900/40 flex flex-col items-center justify-center gap-1 p-6 text-gray-400 hover:text-rose-500 hover:border-rose-400 dark:hover:text-rose-400 transition-colors w-full">
-            <span className="text-xl leading-none">+</span>
-            <span className="text-xs font-medium">Add credit card or debt account</span>
-          </button>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {debtAccounts.map((acc, idx) => (
-              <CardWrap key={acc.id} id={acc.id} highlightId={highlightId}>
-                <DebtAccountCard
-                  acc={acc}
-                  onUpdate={(f, v) => updateDebt(acc.id, f, v)}
-                  onRemove={() => removeDebt(acc.id)}
-                  demoMode={demoMode} demoBankIdx={cashAccounts.length + idx}
-                  demoBal={DEMO_DEBT_BALS[idx % DEMO_DEBT_BALS.length]}
-                />
-              </CardWrap>
-            ))}
+        {(() => {
+          const reMortgages = (budget.properties ?? []).filter(p => p.mortgage?.enabled && (p.mortgage?.balance ?? 0) > 0)
+          const hasCards = debtAccounts.length > 0 || reMortgages.length > 0
+          return hasCards ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {/* Auto-populated mortgages from Real Estate */}
+              {reMortgages.map(p => (
+                <MortgageDebtCard key={`mort-${p.id}`} property={p} onGoToRealEstate={onGoToRealEstate} />
+              ))}
+              {/* Manual debt accounts */}
+              {debtAccounts.map((acc, idx) => (
+                <CardWrap key={acc.id} id={acc.id} highlightId={highlightId}>
+                  <DebtAccountCard
+                    acc={acc}
+                    onUpdate={(f, v) => updateDebt(acc.id, f, v)}
+                    onRemove={() => removeDebt(acc.id)}
+                    demoMode={demoMode} demoBankIdx={cashAccounts.length + idx}
+                    demoBal={DEMO_DEBT_BALS[idx % DEMO_DEBT_BALS.length]}
+                  />
+                </CardWrap>
+              ))}
+              <button onClick={addDebt}
+                className="rounded-xl border border-dashed border-rose-200 dark:border-rose-900/40 flex flex-col items-center justify-center gap-1 p-4 text-gray-400 hover:text-rose-500 hover:border-rose-400 dark:hover:text-rose-400 transition-colors min-h-[100px]">
+                <span className="text-xl leading-none">+</span>
+                <span className="text-xs font-medium">Add Account</span>
+              </button>
+            </div>
+          ) : (
             <button onClick={addDebt}
-              className="rounded-xl border border-dashed border-rose-200 dark:border-rose-900/40 flex flex-col items-center justify-center gap-1 p-4 text-gray-400 hover:text-rose-500 hover:border-rose-400 dark:hover:text-rose-400 transition-colors min-h-[100px]">
+              className="rounded-xl border border-dashed border-rose-200 dark:border-rose-900/40 flex flex-col items-center justify-center gap-1 p-6 text-gray-400 hover:text-rose-500 hover:border-rose-400 dark:hover:text-rose-400 transition-colors w-full">
               <span className="text-xl leading-none">+</span>
-              <span className="text-xs font-medium">Add Account</span>
+              <span className="text-xs font-medium">Add credit card or debt account</span>
             </button>
-          </div>
-        )}
+          )
+        })()}
       </section>
 
       <div className="border-t border-gray-100 dark:border-gray-800" />
