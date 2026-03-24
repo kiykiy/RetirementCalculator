@@ -837,60 +837,75 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                   {/* Appreciation: mode tabs + input on same row */}
                   <div>
                     <label className="label">Annual Appreciation</label>
-                    <div className="flex items-center gap-2">
-                      {/* Mode tabs */}
-                      <div className="flex items-center gap-0.5 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 flex-shrink-0">
-                        {[
-                          { id: 'manual', label: 'Manual' },
-                          { id: 'market', label: 'Market' },
-                          { id: 'dcf',    label: 'DCF' },
-                        ].map(m => (
-                          <button key={m.id}
-                            onClick={() => {
-                              if (m.id === 'market' && cityBench) {
-                                onUpdate({ appreciationMode: m.id, appreciation: cityBench.appreciation })
-                              } else {
-                                upd('appreciationMode', m.id)
-                              }
-                            }}
-                            className={`px-2 py-1 text-[11px] font-medium rounded-md transition-all ${
-                              (property.appreciationMode ?? 'manual') === m.id
-                                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
-                                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                            }`}
-                          >{m.label}</button>
-                        ))}
-                      </div>
-                      {/* Inline input — Manual mode */}
-                      {(property.appreciationMode ?? 'manual') === 'manual' && (
-                        <div className="flex-1">
-                          <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
-                        </div>
-                      )}
-                      {/* Inline value — Market & DCF modes */}
-                      {(property.appreciationMode ?? 'manual') !== 'manual' && (
-                        <span className="text-xs font-bold tabular-nums text-gray-700 dark:text-gray-300">{property.appreciation ?? 0}%</span>
-                      )}
-                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {/* Manual tab */}
+                      <button
+                        onClick={() => upd('appreciationMode', 'manual')}
+                        className={`px-3 py-1.5 text-[11px] font-medium rounded-lg transition-all flex-shrink-0 ${
+                          (property.appreciationMode ?? 'manual') === 'manual'
+                            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                      >Manual</button>
 
-                    {/* Market dropdown — shown below when Market mode is active */}
-                    {(property.appreciationMode ?? 'manual') === 'market' && (
-                      <div className="mt-2 space-y-1.5">
+                      {/* Market tab + inline selector */}
+                      <button
+                        onClick={() => {
+                          if ((property.appreciationMode ?? 'manual') !== 'market') {
+                            if (cityBench) {
+                              onUpdate({ appreciationMode: 'market', appreciation: cityBench.appreciation })
+                            } else {
+                              upd('appreciationMode', 'market')
+                            }
+                          }
+                        }}
+                        className={`px-3 py-1.5 text-[11px] font-medium rounded-lg transition-all flex-shrink-0 ${
+                          (property.appreciationMode ?? 'manual') === 'market'
+                            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                      >Market</button>
+
+                      {/* Market selector slides in beside Market button */}
+                      {(property.appreciationMode ?? 'manual') === 'market' && (
                         <select value={property.city ?? ''} onChange={e => {
                             const city = e.target.value
                             const bench = CITY_BENCHMARKS.find(c => c.city === city)
                             onUpdate({ city, ...(bench ? { appreciation: bench.appreciation } : {}) })
                           }}
-                          className="input-field text-xs py-1.5 w-full">
-                          <option value="">— Select market —</option>
+                          className="input-field text-[11px] py-1 flex-1 min-w-0">
+                          <option value="">— Select —</option>
                           {CITY_BENCHMARKS.map(c => (
-                            <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%/yr)</option>
+                            <option key={c.city} value={c.city}>{c.city} ({c.appreciation}%)</option>
                           ))}
                         </select>
-                        {cityBench && (
-                          <p className="text-[10px] text-gray-400">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></p>
-                        )}
-                      </div>
+                      )}
+
+                      {/* DCF tab */}
+                      <button
+                        onClick={() => upd('appreciationMode', 'dcf')}
+                        className={`px-3 py-1.5 text-[11px] font-medium rounded-lg transition-all flex-shrink-0 ${
+                          (property.appreciationMode ?? 'manual') === 'dcf'
+                            ? 'bg-gray-900 text-white shadow-sm dark:bg-white dark:text-gray-900'
+                            : 'bg-gray-100 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                        }`}
+                      >DCF</button>
+
+                      {/* Narrow input — Manual mode */}
+                      {(property.appreciationMode ?? 'manual') === 'manual' && (
+                        <div className="w-16 flex-shrink-0">
+                          <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
+                        </div>
+                      )}
+                      {/* Inline value — Market & DCF modes */}
+                      {(property.appreciationMode ?? 'manual') !== 'manual' && (
+                        <span className="text-xs font-bold tabular-nums text-gray-700 dark:text-gray-300 flex-shrink-0">{property.appreciation ?? 0}%</span>
+                      )}
+                    </div>
+
+                    {/* Market hint */}
+                    {(property.appreciationMode ?? 'manual') === 'market' && cityBench && (
+                      <p className="text-[10px] text-gray-400 mt-1">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></p>
                     )}
 
                     {/* DCF controls — shown below when DCF mode is active */}
