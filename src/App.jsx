@@ -1338,10 +1338,11 @@ export default function App() {
                     <div className="space-y-1.5 border-t border-gray-700 pt-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">What gets populated</p>
                       <div className="space-y-1 text-[11px]">
-                        <p><span className="text-amber-400 font-medium">Retirement</span> — profile (Alex, age 45, ON), RRSP/TFSA/non-reg balances, CPP &amp; OAS settings, 4% withdrawal strategy</p>
-                        <p><span className="text-amber-400 font-medium">Budget</span> — monthly income &amp; expense categories, big purchase reserve items (home, car, computer)</p>
-                        <p><span className="text-amber-400 font-medium">Accounts</span> — chequing, savings, credit card, mortgage, RRSP, TFSA and non-reg accounts with balances</p>
-                        <p><span className="text-amber-400 font-medium">Real Estate</span> — sample primary residence with mortgage, appreciation rate &amp; property details</p>
+                        <p><span className="text-emerald-400 font-medium">✓ Budget</span> — monthly income &amp; expense categories, big purchase reserve items (home, car, computer)</p>
+                        <p><span className="text-emerald-400 font-medium">✓ Accounts</span> — chequing, savings, credit card, mortgage, RRSP, TFSA and non-reg accounts with balances</p>
+                        <p><span className="text-emerald-400 font-medium">✓ Real Estate</span> — sample primary residence with mortgage, appreciation rate &amp; property details</p>
+                        <p><span className="text-emerald-400 font-medium">✓ Spend</span> — sample transaction history for categorisation</p>
+                        <p><span className="text-gray-500 font-medium">✗ Retirement</span> — uses your actual inputs; edit them in the sidebar</p>
                       </div>
                     </div>
                     <p className="text-[10px] text-gray-500">Your own saved data is preserved — toggling Demo off restores it.</p>
