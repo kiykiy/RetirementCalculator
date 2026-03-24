@@ -131,9 +131,9 @@ function AccountTooltip({ row, type }) {
     // Excluded items note
     const excluded = []
     if (tfsaWd > 0) excluded.push(`TFSA $${Math.round(tfsaWd).toLocaleString()} (tax-free)`)
-    if (nonRegFull > 0 && cgTaxable < nonRegFull) excluded.push(`Non-Reg return of capital $${Math.round(nonRegFull - cgTaxable).toLocaleString()}`)
-    lines._note = 'Taxable income only — determines your tax bracket.'
-    if (excluded.length > 0) lines._excluded = `Not included: ${excluded.join(', ')}`
+    if (nonRegFull > 0 && cg > 0) excluded.push(`Non-Reg 50% CG exclusion $${Math.round(cg * 0.5).toLocaleString()}`)
+    lines._note = 'Taxable income only — determines your tax bracket. TFSA withdrawals and the non-taxable portion of Non-Reg are excluded.'
+    if (excluded.length > 0) lines._excluded = `Not included: ${excluded.join('; ')}`
   }
 
   const activeLines = lines.filter(Boolean)
