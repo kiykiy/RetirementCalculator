@@ -1117,7 +1117,7 @@ export default function App() {
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}>T</span>
-          <span className={`text-[8px] font-medium leading-none ${activeApp === 'tracking' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Spend</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'tracking' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Trans</span>
         </button>
 
         {/* A — Accounts module */}
@@ -1145,7 +1145,7 @@ export default function App() {
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}>RE</span>
-          <span className={`text-[8px] font-medium leading-none ${activeApp === 'realestate' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>Home</span>
+          <span className={`text-[8px] font-medium leading-none ${activeApp === 'realestate' ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-600'}`}>RE</span>
         </button>
 
         {/* Divider before help */}
@@ -1306,8 +1306,9 @@ export default function App() {
               )}
 
 
-              {/* Snapshots */}
+              {/* Snapshots — desktop only */}
               {activeApp === 'retirement' && (
+                <div className="hidden sm:block">
                 <SnapshotsPanel
                   snapshots={snapshots}
                   activeSnapshotName={activeSnapshotName}
@@ -1320,6 +1321,7 @@ export default function App() {
                   onDelete={deleteSnapshot}
                   onRename={(id, name) => { renameSnapshot(id, name); setActiveSnapshotName(name) }}
                 />
+                </div>
               )}
 
 
@@ -1341,7 +1343,7 @@ export default function App() {
                         <p><span className="text-emerald-400 font-medium">✓ Budget</span> — monthly income &amp; expense categories, big purchase reserve items (home, car, computer)</p>
                         <p><span className="text-emerald-400 font-medium">✓ Accounts</span> — chequing, savings, credit card, mortgage, RRSP, TFSA and non-reg accounts with balances</p>
                         <p><span className="text-emerald-400 font-medium">✓ Real Estate</span> — sample primary residence with mortgage, appreciation rate &amp; property details</p>
-                        <p><span className="text-emerald-400 font-medium">✓ Spend</span> — sample transaction history for categorisation</p>
+                        <p><span className="text-emerald-400 font-medium">✓ Transactions</span> — sample transaction history for categorisation</p>
                         <p><span className="text-gray-500 font-medium">✗ Retirement</span> — uses your actual inputs; edit them in the sidebar</p>
                       </div>
                     </div>

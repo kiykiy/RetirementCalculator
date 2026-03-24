@@ -58,7 +58,9 @@
       "Bash(where node:*)",
       "Bash(where vite:*)",
       "Bash(ls \"C:\\\\Users\\\\kixka\\\\OneDrive\\\\Desktop\\\\RR Project\\\\Vercel-Financial-Planner\\\\node_modules\\\\.bin\\\\vite\"*)",
-      "Bash('/c/Program Files/nodejs/node.exe' node_modules/vite/bin/vite.js --port 5173)"
+      "Bash('/c/Program Files/nodejs/node.exe' node_modules/vite/bin/vite.js --port 5173)",
+      "Bash(npx vercel:*)",
+      "mcp__plugin_claude-mem_mcp-search__smart_search"
     ]
   }
 }
