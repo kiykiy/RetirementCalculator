@@ -98,15 +98,41 @@ function AccountTooltip({ row, type }) {
       totalWithdrawn > 0 && { label: 'Total Withdrawn', value: -totalWithdrawn, color: 'text-red-600 dark:text-red-400', bold: true },
       totalDeposited > 0 && { label: 'Total Reinvested', value: totalDeposited, color: 'text-emerald-600 dark:text-emerald-400', bold: true },
     ]
+  } else if (type === 'grossWD') {
+    balance = row.grossWithdrawal ?? 0
+    lines = [
+      (row.rrifWithdrawn ?? 0) > 0 && { label: 'RRIF', value: row.rrifWithdrawn, color: 'text-red-500 dark:text-red-400' },
+      (row.tfsaWithdrawn ?? 0) > 0 && { label: 'TFSA', value: row.tfsaWithdrawn, color: 'text-violet-600 dark:text-violet-400' },
+      (row.nonRegWithdrawn ?? 0) > 0 && { label: 'Non-Reg', value: row.nonRegWithdrawn, color: 'text-amber-600 dark:text-amber-400' },
+      balance > 0 && { label: 'Total Gross W/D', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
+    ]
+  } else if (type === 'grossIncome') {
+    balance = row.grossIncome ?? 0
+    const wd = row.grossWithdrawal ?? 0
+    const cpp = row.cpp ?? 0
+    const oas = row.oas ?? 0
+    const db  = row.dbPension ?? 0
+    const other = row.otherPension ?? 0
+    const inflow = row.cashInflow ?? 0
+    lines = [
+      wd > 0    && { label: 'Portfolio W/D', value: wd, color: 'text-red-500 dark:text-red-400' },
+      cpp > 0   && { label: 'CPP', value: cpp, color: 'text-blue-600 dark:text-blue-400' },
+      oas > 0   && { label: 'OAS (net)', value: oas, color: 'text-blue-600 dark:text-blue-400' },
+      db > 0    && { label: 'DB Pension', value: db, color: 'text-emerald-600 dark:text-emerald-400' },
+      other > 0 && { label: 'Other Pension', value: other, color: 'text-emerald-600 dark:text-emerald-400' },
+      inflow > 0 && { label: 'One-Time Inflow', value: inflow, color: 'text-green-600 dark:text-green-400' },
+      balance > 0 && { label: 'Gross Income', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
+    ]
   }
 
   const activeLines = lines.filter(Boolean)
   if (activeLines.length === 0 && balance === 0) return <span>—</span>
 
-  const displayValue = type === 'portfolio'
-    ? fmt(row.portfolioTotal)
+  const displayValue = type === 'portfolio' ? fmt(row.portfolioTotal)
     : type === 'rrif' ? fmt(row.rrifTotal)
     : type === 'tfsa' ? fmt(row.tfsaTotal)
+    : type === 'grossWD' ? fmt(row.grossWithdrawal)
+    : type === 'grossIncome' ? fmt(row.grossIncome)
     : fmt(row.nonRegTotal)
 
   // Position tooltip above-left of cursor, clamped to viewport
@@ -123,15 +149,17 @@ function AccountTooltip({ row, type }) {
           style={{ left: tipLeft, top: tipTop, width: TIP_W, transform: 'translateY(-100%)' }}
         >
           <p className="font-semibold text-gray-700 dark:text-gray-200 mb-1.5">
-            {type === 'portfolio' ? 'Portfolio' : type === 'rrif' ? 'RRIF' : type === 'tfsa' ? 'TFSA' : 'Non-Reg'} — Age {row.age}
+            {type === 'portfolio' ? 'Portfolio' : type === 'rrif' ? 'RRIF' : type === 'tfsa' ? 'TFSA' : type === 'grossWD' ? 'Gross Withdrawal' : type === 'grossIncome' ? 'Gross Income' : 'Non-Reg'} — Age {row.age}
           </p>
           {activeLines.map((l, i) => (
             <FlowLine key={i} label={l.label} value={l.value} color={l.color} bold={l.bold} indent={l.indent} />
           ))}
-          <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200 pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
-            <span className="min-w-0">End Balance</span>
-            <span className="tabular-nums whitespace-nowrap ml-2 shrink-0">{fmtFull(balance)}</span>
-          </div>
+          {type !== 'grossWD' && type !== 'grossIncome' && (
+            <div className="flex justify-between font-semibold text-gray-800 dark:text-gray-200 pt-1 border-t border-gray-100 dark:border-gray-700 mt-1">
+              <span className="min-w-0">End Balance</span>
+              <span className="tabular-nums whitespace-nowrap ml-2 shrink-0">{fmtFull(balance)}</span>
+            </div>
+          )}
           {type === 'tfsa' && (row.tfsaAnnualLimit ?? 0) > 0 && (
             <div className="pt-1.5 border-t border-gray-100 dark:border-gray-700 mt-1.5 space-y-0.5">
               <div className="flex justify-between text-gray-400 dark:text-gray-500">
@@ -242,7 +270,7 @@ const COLS = [
   { key: 'tfsaTotal',       label: 'TFSA Total',       fmt: fmt, tooltip: 'tfsa' },
   { key: 'nonRegTotal',     label: 'Non-Reg Total',    fmt: fmt, tooltip: 'nonreg' },
   { key: 'rrif_min',        label: 'RRIF Min',         fmt: fmt },
-  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt },
+  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt, tooltip: 'grossWD' },
   { key: 'cashInflow',      label: 'One-Time Inflow',  fmt: fmt, editableInflow: true },
   { key: 'cashOutflow',     label: 'One-Time Outflow', fmt: fmt, editable: true },
   { key: 'cpp',             label: 'CPP',              fmt: fmt },
@@ -250,7 +278,7 @@ const COLS = [
   { key: 'oasClawback',     label: 'OAS Clawback',     fmt: fmt },
   { key: 'dbPension',       label: 'DB Pension',       fmt: fmt },
   { key: 'otherPension',    label: 'Other Pension',    fmt: fmt },
-  { key: 'grossIncome',     label: 'Gross Income',     fmt: fmt },
+  { key: 'grossIncome',     label: 'Gross Income',     fmt: fmt, tooltip: 'grossIncome' },
   { key: 'federalTax',      label: 'Fed Tax',          fmt: fmt },
   { key: 'provincialTax',   label: 'Prov Tax',         fmt: fmt },
   { key: 'totalTax',        label: 'Total Tax',        fmt: fmt },
