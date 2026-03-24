@@ -834,42 +834,52 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                     </div>
                   )}
 
-                  {/* Appreciation mode selector */}
+                  {/* Appreciation: mode tabs + input on same row */}
                   <div>
                     <label className="label">Annual Appreciation</label>
-                    <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 mb-2">
-                      {[
-                        { id: 'manual', label: 'Manual' },
-                        { id: 'market', label: 'Market' },
-                        { id: 'dcf',    label: 'DCF Model' },
-                      ].map(m => (
-                        <button key={m.id}
-                          onClick={() => {
-                            upd('appreciationMode', m.id)
-                            if (m.id === 'market' && cityBench) upd('appreciation', cityBench.appreciation)
-                          }}
-                          className={`flex-1 px-2 py-1 text-[11px] font-medium rounded-md transition-all ${
-                            (property.appreciationMode ?? 'manual') === m.id
-                              ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
-                              : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                          }`}
-                        >{m.label}</button>
-                      ))}
+                    <div className="flex items-center gap-2">
+                      {/* Mode tabs */}
+                      <div className="flex items-center gap-0.5 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 flex-shrink-0">
+                        {[
+                          { id: 'manual', label: 'Manual' },
+                          { id: 'market', label: 'Market' },
+                          { id: 'dcf',    label: 'DCF' },
+                        ].map(m => (
+                          <button key={m.id}
+                            onClick={() => {
+                              if (m.id === 'market' && cityBench) {
+                                onUpdate({ appreciationMode: m.id, appreciation: cityBench.appreciation })
+                              } else {
+                                upd('appreciationMode', m.id)
+                              }
+                            }}
+                            className={`px-2 py-1 text-[11px] font-medium rounded-md transition-all ${
+                              (property.appreciationMode ?? 'manual') === m.id
+                                ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                            }`}
+                          >{m.label}</button>
+                        ))}
+                      </div>
+                      {/* Inline input — Manual mode */}
+                      {(property.appreciationMode ?? 'manual') === 'manual' && (
+                        <div className="flex-1">
+                          <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
+                        </div>
+                      )}
+                      {/* Inline value — Market & DCF modes */}
+                      {(property.appreciationMode ?? 'manual') !== 'manual' && (
+                        <span className="text-xs font-bold tabular-nums text-gray-700 dark:text-gray-300">{property.appreciation ?? 0}%</span>
+                      )}
                     </div>
 
-                    {/* Manual mode */}
-                    {(property.appreciationMode ?? 'manual') === 'manual' && (
-                      <PctInput value={property.appreciation ?? 0} onChange={v => upd('appreciation', v)} />
-                    )}
-
-                    {/* Market mode */}
+                    {/* Market dropdown — shown below when Market mode is active */}
                     {(property.appreciationMode ?? 'manual') === 'market' && (
-                      <div className="space-y-2">
+                      <div className="mt-2 space-y-1.5">
                         <select value={property.city ?? ''} onChange={e => {
                             const city = e.target.value
-                            upd('city', city)
                             const bench = CITY_BENCHMARKS.find(c => c.city === city)
-                            if (bench) upd('appreciation', bench.appreciation)
+                            onUpdate({ city, ...(bench ? { appreciation: bench.appreciation } : {}) })
                           }}
                           className="input-field text-xs py-1.5 w-full">
                           <option value="">— Select market —</option>
@@ -878,24 +888,18 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBu
                           ))}
                         </select>
                         {cityBench && (
-                          <div className="flex justify-between text-[11px] bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2">
-                            <span className="text-blue-700 dark:text-blue-300 font-medium">Using historical avg</span>
-                            <span className="font-bold tabular-nums text-blue-700 dark:text-blue-300">{property.appreciation ?? 0}%/yr</span>
-                          </div>
+                          <p className="text-[10px] text-gray-400">Historical avg: <strong className="text-gray-600 dark:text-gray-300">{cityBench.appreciation}%/yr</strong></p>
                         )}
                       </div>
                     )}
 
-                    {/* DCF mode */}
+                    {/* DCF controls — shown below when DCF mode is active */}
                     {(property.appreciationMode ?? 'manual') === 'dcf' && (
-                      <div className="space-y-2">
+                      <div className="mt-2 space-y-2">
                         {property.appreciationBeforeDcf !== null && property.appreciationBeforeDcf !== undefined ? (
-                          <div className="flex justify-between text-[11px] bg-brand-50 dark:bg-brand-900/20 rounded-lg px-3 py-2">
-                            <span className="text-brand-700 dark:text-brand-300 font-medium">DCF implied appreciation</span>
-                            <span className="font-bold tabular-nums text-brand-700 dark:text-brand-300">{property.appreciation ?? 0}%/yr</span>
-                          </div>
+                          <p className="text-[10px] text-brand-600 dark:text-brand-400 font-medium">DCF model implied rate applied</p>
                         ) : (
-                          <p className="text-[11px] text-gray-400 dark:text-gray-500">Run the DCF model to calculate implied appreciation.</p>
+                          <p className="text-[10px] text-gray-400 dark:text-gray-500">Run the DCF model to calculate implied appreciation.</p>
                         )}
                         {(property.currentValue ?? 0) > 0 && (
                           <button
