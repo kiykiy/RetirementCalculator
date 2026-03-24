@@ -9,6 +9,21 @@ function fmt(n) {
   return `$${n.toLocaleString()}`
 }
 
+function Th({ children, tip, color = 'text-gray-400 dark:text-gray-500' }) {
+  return (
+    <th className={`text-left py-2.5 px-2 font-medium whitespace-nowrap ${color}`}>
+      {tip ? (
+        <span className="group relative cursor-help border-b border-dotted border-current">
+          {children}
+          <span className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-52 rounded-lg bg-gray-900 dark:bg-gray-800 text-white text-[11px] leading-relaxed p-2.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 font-normal normal-case whitespace-normal">
+            {tip}
+          </span>
+        </span>
+      ) : children}
+    </th>
+  )
+}
+
 function ContribTooltip({ row, accounts }) {
   const [show, setShow] = useState(false)
   const timer = useRef(null)
@@ -118,20 +133,20 @@ export default function AccumulationTable({
         <table className="min-w-full text-xs">
           <thead>
             <tr className="border-b border-gray-100 dark:border-gray-800">
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Age</th>
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Year</th>
+              <Th>Age</Th>
+              <Th>Year</Th>
               {accounts.map(acc => (
-                <th key={acc.id} className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">{acc.name}</th>
+                <Th key={acc.id} tip={acc.taxType === 'rrif' ? 'Registered (RRSP/RRIF). Contributions are tax-deductible. Withdrawals are 100% taxable.' : acc.taxType === 'tfsa' ? 'Tax-Free Savings Account. Growth and withdrawals are completely tax-free.' : acc.taxType === 'nonreg' ? 'Non-registered. Only capital gains (50% inclusion) and interest/dividends are taxable.' : null}>{acc.name}</Th>
               ))}
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Total</th>
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Contribution</th>
-              <th className="text-left py-2.5 px-2 text-brand-600 font-medium whitespace-nowrap dark:text-brand-400">One-Time Inflow</th>
-              <th className="text-left py-2.5 px-2 text-red-500 font-medium whitespace-nowrap dark:text-red-400">One-Time Outflow</th>
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Gross Return</th>
+              <Th tip="Combined balance across all investment accounts.">Total</Th>
+              <Th tip="Annual contributions to each account. TFSA contributions scale with CPI-indexed limit when enabled.">Contribution</Th>
+              <Th color="text-brand-600 dark:text-brand-400" tip="Lump-sum cash added in a specific year (inheritance, bonus). Goes to non-registered accounts.">One-Time Inflow</Th>
+              <Th color="text-red-500 dark:text-red-400" tip="Lump-sum withdrawal in a specific year (home purchase, large expense). Withdrawn proportionally from accounts.">One-Time Outflow</Th>
+              <Th tip="Investment returns before tax. Based on each account's rate of return.">Gross Return</Th>
               {hasNonRegTaxDrag && (
-                <th className="text-left py-2.5 px-2 text-amber-600 font-medium whitespace-nowrap dark:text-amber-400">Tax Drag</th>
+                <Th color="text-amber-600 dark:text-amber-400" tip="Annual tax on non-reg investment income (interest, dividends, realized gains) during accumulation. Reduces effective growth rate.">Tax Drag</Th>
               )}
-              <th className="text-left py-2.5 px-2 text-gray-400 font-medium whitespace-nowrap dark:text-gray-500">Net Growth</th>
+              <Th tip="Net portfolio growth: contributions + returns − tax drag.">Net Growth</Th>
             </tr>
           </thead>
           <tbody>

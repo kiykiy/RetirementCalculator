@@ -285,26 +285,26 @@ function AccAccountTooltip({ row, acc, accounts, accCashInflows, accCashOutflows
 
 const COLS = [
   { key: 'age',             label: 'Age',             fmt: v => v },
-  { key: 'portfolioTotal',  label: 'Portfolio',        fmt: fmt, tooltip: 'portfolio' },
-  { key: 'rrifTotal',       label: 'RRIF Total',       fmt: fmt, tooltip: 'rrif' },
-  { key: 'tfsaTotal',       label: 'TFSA Total',       fmt: fmt, tooltip: 'tfsa' },
-  { key: 'nonRegTotal',     label: 'Non-Reg Total',    fmt: fmt, tooltip: 'nonreg' },
-  { key: 'rrif_min',        label: 'RRIF Min',         fmt: fmt },
-  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt, tooltip: 'grossWD' },
-  { key: 'cashInflow',      label: 'One-Time Inflow',  fmt: fmt, editableInflow: true },
-  { key: 'cashOutflow',     label: 'One-Time Outflow', fmt: fmt, editable: true },
-  { key: 'cpp',             label: 'CPP',              fmt: fmt },
-  { key: 'oas',             label: 'OAS (net)',         fmt: fmt },
-  { key: 'oasClawback',     label: 'OAS Clawback',     fmt: fmt },
-  { key: 'dbPension',       label: 'DB Pension',       fmt: fmt },
-  { key: 'otherPension',    label: 'Other Pension',    fmt: fmt },
-  { key: 'grossIncome',     label: 'Gross Income',     fmt: fmt, tooltip: 'grossIncome' },
-  { key: 'federalTax',      label: 'Fed Tax',          fmt: fmt },
-  { key: 'provincialTax',   label: 'Prov Tax',         fmt: fmt },
-  { key: 'totalTax',        label: 'Total Tax',        fmt: fmt },
-  { key: 'netIncome',       label: 'Net Income',       fmt: fmt },
-  { key: 'effectiveRate',   label: 'Eff Rate',         fmt: v => pct(v * 100) },
-  { key: 'withdrawalRate',  label: 'W/D Rate',         fmt: v => pct(v) },
+  { key: 'portfolioTotal',  label: 'Portfolio',        fmt: fmt, tooltip: 'portfolio', tip: 'Total balance across all investment accounts (RRIF + TFSA + Non-Reg). Hover values for flow breakdown.' },
+  { key: 'rrifTotal',       label: 'RRIF Total',       fmt: fmt, tooltip: 'rrif', tip: 'Registered retirement fund. Withdrawals are 100% taxable income. Mandatory minimums increase with age.' },
+  { key: 'tfsaTotal',       label: 'TFSA Total',       fmt: fmt, tooltip: 'tfsa', tip: 'Tax-Free Savings Account. Withdrawals are completely tax-free and do not count as income.' },
+  { key: 'nonRegTotal',     label: 'Non-Reg Total',    fmt: fmt, tooltip: 'nonreg', tip: 'Non-registered account. Only capital gains (50% inclusion) and interest/dividends are taxable on withdrawal.' },
+  { key: 'rrif_min',        label: 'RRIF Min',         fmt: fmt, tip: 'Government-mandated minimum RRIF withdrawal. Increases each year based on age. Must be withdrawn even if not needed.' },
+  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt, tooltip: 'grossWD', tip: 'Total cash withdrawn from all accounts. Includes tax-free TFSA — differs from Gross Income which only counts taxable amounts.' },
+  { key: 'cashInflow',      label: 'One-Time Inflow',  fmt: fmt, editableInflow: true, tip: 'Lump-sum cash received (inheritance, bonus, property sale). Offsets spending need and reduces portfolio withdrawals.' },
+  { key: 'cashOutflow',     label: 'One-Time Outflow', fmt: fmt, editable: true, tip: 'Lump-sum expense (home reno, vehicle, gift). Increases gross withdrawal needed that year.' },
+  { key: 'cpp',             label: 'CPP',              fmt: fmt, tip: 'Canada Pension Plan benefit. Starts at your chosen age (60–70). Fully taxable income.' },
+  { key: 'oas',             label: 'OAS (net)',         fmt: fmt, tip: 'Old Age Security after clawback. Starts at chosen age (65–70). Subject to recovery tax if income exceeds ~$90K.' },
+  { key: 'oasClawback',     label: 'OAS Clawback',     fmt: fmt, tip: 'OAS recovery tax. 15¢ per dollar of net income above the threshold (~$90K). Can reduce OAS to zero.' },
+  { key: 'dbPension',       label: 'DB Pension',       fmt: fmt, tip: 'Defined benefit workplace pension. Fully taxable income.' },
+  { key: 'otherPension',    label: 'Other Pension',    fmt: fmt, tip: 'Other pension income (annuities, foreign pensions, etc.). Fully taxable.' },
+  { key: 'grossIncome',     label: 'Gross Income',     fmt: fmt, tooltip: 'grossIncome', tip: 'Taxable income only. Includes RRIF, taxable Non-Reg gains, CPP, OAS, pensions. Excludes tax-free TFSA withdrawals.' },
+  { key: 'federalTax',      label: 'Fed Tax',          fmt: fmt, tip: 'Federal income tax based on graduated tax brackets.' },
+  { key: 'provincialTax',   label: 'Prov Tax',         fmt: fmt, tip: 'Provincial income tax based on your selected province.' },
+  { key: 'totalTax',        label: 'Total Tax',        fmt: fmt, tip: 'Combined federal + provincial tax.' },
+  { key: 'netIncome',       label: 'Net Income',       fmt: fmt, tip: 'Cash available after all taxes. Gross withdrawals + government income − total tax.' },
+  { key: 'effectiveRate',   label: 'Eff Rate',         fmt: v => pct(v * 100), tip: 'Effective tax rate: total tax ÷ gross taxable income. Your actual average rate paid.' },
+  { key: 'withdrawalRate',  label: 'W/D Rate',         fmt: v => pct(v), tip: 'Annual withdrawal as % of portfolio. Sustainable rate is typically 3–4%. Above 5% increases depletion risk.' },
 ]
 
 // ─── Export components for AccumulationTable ────────────────────────────────
@@ -375,7 +375,14 @@ export default function DetailTable({
                                        'text-gray-400 dark:text-gray-500'
                   }`}
                 >
-                  {c.label}
+                  {c.tip ? (
+                    <span className="group relative cursor-help border-b border-dotted border-current">
+                      {c.label}
+                      <span className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-52 rounded-lg bg-gray-900 dark:bg-gray-800 text-white text-[11px] leading-relaxed p-2.5 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity z-50 font-normal normal-case whitespace-normal">
+                        {c.tip}
+                      </span>
+                    </span>
+                  ) : c.label}
                 </th>
               ))}
             </tr>
