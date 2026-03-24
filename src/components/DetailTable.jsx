@@ -290,7 +290,7 @@ const COLS = [
   { key: 'tfsaTotal',       label: 'TFSA Total',       fmt: fmt, tooltip: 'tfsa', tip: 'Tax-Free Savings Account. Withdrawals are completely tax-free and do not count as income.' },
   { key: 'nonRegTotal',     label: 'Non-Reg Total',    fmt: fmt, tooltip: 'nonreg', tip: 'Non-registered account. Only capital gains (50% inclusion) and interest/dividends are taxable on withdrawal.' },
   { key: 'rrif_min',        label: 'RRIF Min',         fmt: fmt, tip: 'Government-mandated minimum RRIF withdrawal. Increases each year based on age. Must be withdrawn even if not needed.' },
-  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt, tooltip: 'grossWD', tip: 'Total cash withdrawn from all accounts. Includes tax-free TFSA — differs from Gross Income which only counts taxable amounts.' },
+  { key: 'grossWithdrawal', label: 'Gross W/D',        fmt: fmt, tooltip: 'grossWD', tip: 'Total cash from all accounts. Includes TFSA (tax-free) — differs from Gross Income (taxable only).' },
   { key: 'cashInflow',      label: 'One-Time Inflow',  fmt: fmt, editableInflow: true, tip: 'Lump-sum cash received (inheritance, bonus, property sale). Offsets spending need and reduces portfolio withdrawals.' },
   { key: 'cashOutflow',     label: 'One-Time Outflow', fmt: fmt, editable: true, tip: 'Lump-sum expense (home reno, vehicle, gift). Increases gross withdrawal needed that year.' },
   { key: 'cpp',             label: 'CPP',              fmt: fmt, tip: 'Canada Pension Plan benefit. Starts at your chosen age (60–70). Fully taxable income.' },
