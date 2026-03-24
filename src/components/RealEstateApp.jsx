@@ -721,7 +721,7 @@ function DCFModal({ property, onClose, onCommit }) {
 }
 
 // ─── Property Card ────────────────────────────────────────────────────────────
-function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
+function PropertyCard({ property, onUpdate, onRemove, readOnly = false, onGoToBudget }) {
   const [showDetails, setShowDetails] = useState(true)
   const [showCosts,   setShowCosts]   = useState(false)
   const [showDCF,     setShowDCF]     = useState(false)
@@ -893,35 +893,51 @@ function PropertyCard({ property, onUpdate, onRemove, readOnly = false }) {
           )}
         </div>
 
-        {/* Costs */}
+        {/* Costs & Carrying — toggle format matching Rental Income */}
         <div>
-          <button type="button" onClick={() => setShowCosts(v => !v)}
-            className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2.5 hover:text-gray-700 dark:hover:text-gray-200 transition-colors w-full text-left">
-            <span className={`inline-block transition-transform ${showCosts ? 'rotate-90' : ''}`}>›</span>
-            Costs &amp; Carrying
-            {monthlyCosts > 0 && <span className="ml-auto font-normal normal-case text-gray-400">${Math.round(monthlyCosts).toLocaleString()}/mo</span>}
-          </button>
-          {showCosts && !readOnly && (
-            <div className="space-y-2.5">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="label">Property Tax (annual)</label>
-                  <NumInput value={property.propertyTax ?? 0} onChange={v => upd('propertyTax', v)} prefix="$" step={100} />
-                </div>
-                <div>
-                  <label className="label">Insurance (annual)</label>
-                  <NumInput value={property.insurance ?? 0} onChange={v => upd('insurance', v)} prefix="$" step={100} />
-                </div>
-              </div>
-              <div>
-                <label className="label">Maintenance (% of value / year)</label>
-                <PctInput value={property.maintenancePct ?? 0} onChange={v => upd('maintenancePct', v)} min={0} max={5} />
-              </div>
+          <div className="flex items-center justify-between mb-2.5">
+            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Costs &amp; Carrying</span>
+            {!readOnly && (
+              <button type="button" onClick={() => upd('costsEnabled', !(property.costsEnabled ?? false))}
+                className={`relative inline-flex h-4 w-7 flex-shrink-0 rounded-full transition-colors ${(property.costsEnabled ?? false) ? 'bg-amber-500' : 'bg-gray-200 dark:bg-gray-700'}`}>
+                <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transform transition-transform mt-0.5 ${(property.costsEnabled ?? false) ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </button>
+            )}
+          </div>
+          {(property.costsEnabled ?? false) && (
+            <div className="space-y-2">
+              {!readOnly && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="label">Property Tax (annual)</label>
+                      <NumInput value={property.propertyTax ?? 0} onChange={v => upd('propertyTax', v)} prefix="$" step={100} />
+                    </div>
+                    <div>
+                      <label className="label">Insurance (annual)</label>
+                      <NumInput value={property.insurance ?? 0} onChange={v => upd('insurance', v)} prefix="$" step={100} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Maintenance (% of value / year)</label>
+                    <PctInput value={property.maintenancePct ?? 0} onChange={v => upd('maintenancePct', v)} min={0} max={5} />
+                  </div>
+                </>
+              )}
               {monthlyCosts > 0 && (
                 <div className="flex justify-between text-xs bg-amber-50 dark:bg-amber-900/20 rounded-lg px-3 py-2">
                   <span className="text-amber-700 dark:text-amber-300 font-medium">Monthly carrying costs</span>
                   <span className="font-bold tabular-nums text-amber-700 dark:text-amber-300">${Math.round(monthlyCosts).toLocaleString()}/mo</span>
                 </div>
+              )}
+              {onGoToBudget && (
+                <button
+                  type="button"
+                  onClick={onGoToBudget}
+                  className="w-full text-[11px] text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors text-center py-1"
+                >
+                  These costs are included in your Budget →
+                </button>
               )}
             </div>
           )}
@@ -1000,7 +1016,7 @@ function defaultProperty() {
   }
 }
 
-export default function RealEstateApp({ budget, onChange, darkMode, demoMode = false }) {
+export default function RealEstateApp({ budget, onChange, darkMode, demoMode = false, onGoToBudget }) {
   const properties = budget.properties ?? []
   const displayProperties = demoMode ? DEMO_PROPERTIES : properties
   const isDemo = demoMode
@@ -1066,6 +1082,7 @@ export default function RealEstateApp({ budget, onChange, darkMode, demoMode = f
               readOnly={isDemo}
               onUpdate={(f, v) => updateProperty(property.id, f, v)}  /* also accepts (patchObj) */
               onRemove={() => removeProperty(property.id)}
+              onGoToBudget={onGoToBudget}
             />
           ))}
 

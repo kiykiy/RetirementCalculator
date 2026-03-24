@@ -1584,7 +1584,8 @@ export default function App() {
           /* Real Estate app */
           <RealEstateApp
             budget={budget} onChange={handleBudgetChange}
-            darkMode={darkMode} demoMode={demoMode} />
+            darkMode={darkMode} demoMode={demoMode}
+            onGoToBudget={() => setActiveApp('budget')} />
 
         ) : activeApp === 'help' ? (
 
