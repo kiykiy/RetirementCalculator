@@ -400,9 +400,9 @@ export default function App() {
   const [scenarioHovered,      setScenarioHovered]      = useState(false)
   const [scenarioActive,       setScenarioActive]       = useState(false)
   const [mobileInputsOpen,     setMobileInputsOpen]     = useState(false)
-  const [isMobileScreen,       setIsMobileScreen]       = useState(() => window.innerWidth < 640)
+  const [isMobileScreen,       setIsMobileScreen]       = useState(() => window.innerWidth < 768)
   useEffect(() => {
-    const handler = () => setIsMobileScreen(window.innerWidth < 640)
+    const handler = () => setIsMobileScreen(window.innerWidth < 768)
     window.addEventListener('resize', handler)
     return () => window.removeEventListener('resize', handler)
   }, [])
@@ -1356,10 +1356,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Reset button — hidden on mobile, moved into profile menu */}
+              {/* Reset button — hidden on mobile/tablet, moved into profile menu */}
               <button
                 onClick={() => { if (window.confirm('Reset all data to defaults?')) { resetToDefaults(); setProfileOpen(false) } }}
-                className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                className="hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 title="Reset all to defaults"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
@@ -1367,10 +1367,10 @@ export default function App() {
                 </svg>
               </button>
 
-              {/* Dark mode toggle — hidden on mobile, moved into profile menu */}
+              {/* Dark mode toggle — hidden on mobile/tablet, moved into profile menu */}
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                className="hidden sm:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
+                className="hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors dark:hover:bg-gray-800 dark:hover:text-gray-300"
                 title={darkMode ? 'Light mode' : 'Dark mode'}
               >
                 {darkMode ? (
