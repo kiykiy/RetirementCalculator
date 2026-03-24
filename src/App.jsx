@@ -29,6 +29,8 @@ import ExpenseTracker     from './components/ExpenseTracker.jsx'
 import NetWorthSnapshot   from './components/NetWorthSnapshot.jsx'
 import SnapshotsPanel, { useSnapshots } from './components/SnapshotsPanel.jsx'
 import ScenarioCompare from './components/ScenarioCompare.jsx'
+import OnboardingWizard from './components/OnboardingWizard.jsx'
+import PDFExportButton  from './components/PDFExport.jsx'
 import { runSimulation, buildAccumulationRows, runMonteCarlo, runJointSimulation } from './lib/simulate.js'
 
 const DEFAULT_INPUTS = {
@@ -399,6 +401,7 @@ export default function App() {
   const [scenarioHovered,      setScenarioHovered]      = useState(false)
   const [scenarioActive,       setScenarioActive]       = useState(false)
   const [mobileInputsOpen,     setMobileInputsOpen]     = useState(false)
+  const [onboardingOpen,       setOnboardingOpen]       = useState(() => !_saved?.inputs?.userName)
   const [sideNavOpen,          setSideNavOpen]          = useState(false)
   const [scenarioOverlay,      setScenarioOverlay]      = useState(false)
   const [scenarioLockRetirement, setScenarioLockRetirement] = useState(false)
@@ -1293,6 +1296,21 @@ export default function App() {
                 </span>
               )}
 
+              {/* Setup Guide */}
+              {activeApp === 'retirement' && !inputs.userName && (
+                <button
+                  onClick={() => setOnboardingOpen(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-brand-600 text-white hover:bg-brand-700 transition-colors"
+                >
+                  ✨ Get started
+                </button>
+              )}
+
+              {/* PDF Export */}
+              {activeApp === 'retirement' && (
+                <PDFExportButton inputs={inputs} result={allResults?.primary ?? null} darkMode={darkMode} />
+              )}
+
               {/* Snapshots */}
               {activeApp === 'retirement' && (
                 <SnapshotsPanel
@@ -1985,6 +2003,15 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Onboarding Wizard ─────────────────────────────────────────────── */}
+      {onboardingOpen && (
+        <OnboardingWizard
+          inputs={inputs}
+          onChange={handleInputChange}
+          onClose={() => setOnboardingOpen(false)}
+        />
       )}
 
     </div>
