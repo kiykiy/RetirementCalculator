@@ -3,6 +3,9 @@ import { createPortal } from 'react-dom'
 import { PROVINCES } from '../lib/tax.js'
 import { calcCPP, calcOAS, calcTfsaLimit, getMixStats, ASSET_CLASSES } from '../lib/simulate.js'
 import { CppOasContent } from './CppOasOptimizer.jsx'
+import RrifMeltdownOptimizer from './RrifMeltdownOptimizer.jsx'
+import { runSimulation } from '../lib/simulate.js'
+import { calcTax } from '../lib/tax.js'
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -387,6 +390,10 @@ const NAV_ITEMS = [
   { key: 'estate',     label: 'Estate'                           },
   { divider: true,     label: 'Tools'                            },
   { key: 'cppoas',     label: 'CPP/OAS Timing', cardWidth: 520  },
+  { key: 'meltdown',   label: 'RRSP Meltdown',  cardWidth: 480  },
+  { key: 'gis',        label: 'GIS Check',      cardWidth: 340  },
+  { key: 'sensitivity',label: 'Sensitivity',     cardWidth: 420  },
+  { key: 'survivor',   label: 'Survivor',        cardWidth: 400  },
 ]
 
 // ─── Person toggle (Primary / Spouse) ─────────────────────────────────────────
@@ -417,7 +424,7 @@ let nextRetIncomeId = 1
 
 export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
   const [active, setActive] = useState(null)
-  const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary' })
+  const [sectionPerson, setSectionPerson] = useState({ accounts: 'primary', cpp: 'primary', oas: 'primary', pension: 'primary', other: 'primary', retincome: 'primary', tax: 'primary', cppoas: 'primary', meltdown: 'primary' })
   const set      = (key) => (val) => onChange({ ...inputs, [key]: val })
   const setSpouse = (key) => (val) => onChange({ ...inputs, spouse: { ...(inputs.spouse ?? {}), [key]: val } })
   const sp        = inputs.spouse ?? {}
@@ -990,6 +997,283 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts }) {
         <div className="space-y-3">
           {spouseEnabled && <PersonToggle primaryName={primaryName} spouseName={spouseName} active={cpWho} onChange={setPerson('cppoas')} />}
           <CppOasContent inputs={cpInputs} onApply={cpApply} />
+        </div>
+      )
+    })(),
+
+    // ── RRSP Meltdown Optimizer ──────────────────────────────────────────────
+    meltdown: (
+      <RrifMeltdownOptimizer
+        inputs={inputs}
+        rrspDrawdown={inputs.rrspDrawdown}
+        onApply={(data) => onChange({ ...inputs, ...data })}
+      />
+    ),
+
+    // ── GIS Eligibility Check ────────────────────────────────────────────────
+    gis: (() => {
+      const retAge = inputs.retirementAge ?? 65
+      const cAge   = inputs.currentAge ?? 45
+      const lifeE  = inputs.lifeExpectancy ?? 90
+      const prov   = inputs.province ?? 'ON'
+      // Estimate retirement income
+      const cppAnn = calcCPP({ avgEarnings: inputs.cppAvgEarnings ?? 0, yearsContributed: inputs.cppYearsContributed ?? 0, startAge: inputs.cppStartAge ?? 65, currentAge: cAge })
+      const oasAnn = calcOAS({ yearsResident: inputs.oasYearsResident ?? 40, startAge: inputs.oasStartAge ?? 65, currentAge: cAge })
+      const dbAnn  = inputs.dbEnabled ? Math.round((inputs.dbBestAvgSalary ?? 0) * (inputs.dbYearsService ?? 0) * (inputs.dbAccrualRate ?? 1.5) / 100) : 0
+      const otherAnn = inputs.otherPension ?? 0
+      // RRIF income estimate (4% of projected balance)
+      const rrifBal = (inputs.accounts ?? []).filter(a => a.taxType === 'rrif').reduce((s, a) => s + (a.balance ?? 0), 0)
+      const yearsToRet = Math.max(0, retAge - cAge)
+      const rrifReturn = (inputs.accounts ?? []).find(a => a.taxType === 'rrif')?.returnRate ?? 6
+      const projRrif = rrifBal * Math.pow(1 + rrifReturn / 100, yearsToRet)
+      const rrifInc = Math.round(projRrif * 0.04)
+      const totalIncome = cppAnn + oasAnn + dbAnn + otherAnn + rrifInc
+
+      // GIS thresholds 2025 (single) — max ~$11,679/yr, income threshold ~$21,624
+      const GIS_MAX = 11679
+      const GIS_THRESHOLD = 21624
+      const GIS_REDUCTION = 0.50 // $1 reduction per $2 of income
+      const eligibleIncome = totalIncome - oasAnn // GIS uses income excluding OAS
+      const gisAmount = Math.max(0, Math.round(GIS_MAX - eligibleIncome * GIS_REDUCTION))
+      const qualifies = eligibleIncome < GIS_THRESHOLD && gisAmount > 0
+
+      const fmtD = n => `$${Math.round(n).toLocaleString()}`
+
+      return (
+        <div className="space-y-3 text-xs">
+          <p className="text-gray-500 dark:text-gray-400">
+            Checks if your projected retirement income qualifies for the Guaranteed Income Supplement (65+, single rates).
+          </p>
+          <div className="space-y-1.5">
+            <div className="flex justify-between"><span className="text-gray-500">CPP</span><span className="font-semibold tabular-nums">{fmtD(cppAnn)}/yr</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">OAS</span><span className="font-semibold tabular-nums">{fmtD(oasAnn)}/yr</span></div>
+            {dbAnn > 0 && <div className="flex justify-between"><span className="text-gray-500">DB Pension</span><span className="font-semibold tabular-nums">{fmtD(dbAnn)}/yr</span></div>}
+            {otherAnn > 0 && <div className="flex justify-between"><span className="text-gray-500">Other Pension</span><span className="font-semibold tabular-nums">{fmtD(otherAnn)}/yr</span></div>}
+            <div className="flex justify-between"><span className="text-gray-500">Est. RRIF draw (4%)</span><span className="font-semibold tabular-nums">{fmtD(rrifInc)}/yr</span></div>
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-1.5 flex justify-between">
+              <span className="font-semibold text-gray-700 dark:text-gray-300">Total Income</span>
+              <span className="font-bold tabular-nums">{fmtD(totalIncome)}/yr</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">GIS-eligible income</span>
+              <span className="font-semibold tabular-nums">{fmtD(eligibleIncome)}/yr</span>
+            </div>
+          </div>
+
+          <div className={`rounded-xl p-3 ${qualifies ? 'bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800' : 'bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700'}`}>
+            {qualifies ? (
+              <>
+                <p className="font-bold text-emerald-700 dark:text-emerald-400 mb-1">✓ May qualify for GIS</p>
+                <p className="text-emerald-600 dark:text-emerald-400">Estimated: <span className="font-bold">{fmtD(gisAmount)}/yr</span> ({fmtD(gisAmount / 12)}/mo)</p>
+                <p className="text-[10px] text-emerald-500 dark:text-emerald-500 mt-1">⚠ RRSP withdrawals reduce GIS. Consider TFSA instead.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-bold text-gray-600 dark:text-gray-300 mb-1">Not GIS eligible</p>
+                <p className="text-gray-500 dark:text-gray-400">Income of {fmtD(eligibleIncome)} exceeds the ~{fmtD(GIS_THRESHOLD)} threshold.</p>
+                <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">This is positive — your retirement income is well above the minimum.</p>
+              </>
+            )}
+          </div>
+
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+            Based on 2025 single rates. Couples have different thresholds. GIS amounts are approximate.
+          </p>
+        </div>
+      )
+    })(),
+
+    // ── Sensitivity Analysis ─────────────────────────────────────────────────
+    sensitivity: (() => {
+      const baseReturn = (inputs.accounts ?? []).reduce((s, a) => s + (a.balance ?? 0) * (a.returnRate ?? 6), 0) / Math.max(1, (inputs.accounts ?? []).reduce((s, a) => s + (a.balance ?? 0), 0))
+      const baseInflation = inputs.inflation ?? 2.5
+      const baseLife = inputs.lifeExpectancy ?? 90
+
+      // Run 5 scenarios: base, low return, high inflation, longer life, worst case
+      const scenarios = [
+        { label: 'Base Case',       returnDelta: 0,    inflDelta: 0,    lifeDelta: 0  },
+        { label: 'Low Returns (−2%)', returnDelta: -2,  inflDelta: 0,    lifeDelta: 0  },
+        { label: 'High Inflation (+2%)', returnDelta: 0, inflDelta: 2,   lifeDelta: 0  },
+        { label: 'Live to 95',      returnDelta: 0,    inflDelta: 0,    lifeDelta: 5  },
+        { label: 'Stress Test',     returnDelta: -2,   inflDelta: 1.5,  lifeDelta: 5  },
+      ]
+
+      const results = scenarios.map(s => {
+        try {
+          const adjAccounts = (inputs.accounts ?? []).map(a => ({
+            ...a,
+            returnRate: Math.max(0, (a.returnRate ?? 6) + s.returnDelta),
+          }))
+          const sim = runSimulation({
+            ...inputs,
+            accounts: adjAccounts,
+            inflation: baseInflation + s.inflDelta,
+            lifeExpectancy: baseLife + s.lifeDelta,
+            scenarioShock: null,
+          })
+          return {
+            label: s.label,
+            finalBalance: sim.summary.finalBalance,
+            exhaustedAge: sim.summary.portfolioExhaustedAge,
+            totalNet: sim.summary.totalNetIncome,
+            yearsInRet: sim.summary.yearsInRetirement,
+          }
+        } catch {
+          return { label: s.label, finalBalance: 0, exhaustedAge: null, totalNet: 0, yearsInRet: 0 }
+        }
+      })
+
+      const baseFinal = results[0]?.finalBalance ?? 0
+      const fmtD = n => {
+        if (n == null || isNaN(n)) return '—'
+        const a = Math.abs(n)
+        if (a >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+        if (a >= 1_000) return `$${(n / 1_000).toFixed(0)}K`
+        return `$${Math.round(n)}`
+      }
+
+      return (
+        <div className="space-y-3 text-xs">
+          <p className="text-gray-500 dark:text-gray-400">
+            How sensitive is your plan to changes in returns, inflation, and longevity?
+          </p>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-gray-100 dark:border-gray-800">
+                <th className="text-left py-1.5 font-semibold text-gray-500 dark:text-gray-400">Scenario</th>
+                <th className="text-right py-1.5 font-semibold text-gray-500 dark:text-gray-400">Final Bal.</th>
+                <th className="text-right py-1.5 font-semibold text-gray-500 dark:text-gray-400">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r, i) => {
+                const delta = r.finalBalance - baseFinal
+                const pct = baseFinal > 0 ? (delta / baseFinal * 100) : 0
+                return (
+                  <tr key={r.label} className={i < results.length - 1 ? 'border-b border-gray-50 dark:border-gray-800/50' : ''}>
+                    <td className={`py-1.5 ${i === 0 ? 'font-semibold text-gray-800 dark:text-gray-200' : 'text-gray-600 dark:text-gray-300'}`}>{r.label}</td>
+                    <td className="py-1.5 text-right tabular-nums font-semibold">{fmtD(r.finalBalance)}</td>
+                    <td className={`py-1.5 text-right tabular-nums font-semibold ${i === 0 ? 'text-gray-400' : delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                      {i === 0 ? '—' : `${delta >= 0 ? '+' : ''}${pct.toFixed(0)}%`}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          {results.some(r => r.exhaustedAge) && (
+            <div className="rounded-xl p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <p className="font-bold text-red-600 dark:text-red-400 mb-1">⚠ Portfolio Exhaustion Risk</p>
+              {results.filter(r => r.exhaustedAge).map(r => (
+                <p key={r.label} className="text-red-500 dark:text-red-400">{r.label}: runs out at age {r.exhaustedAge}</p>
+              ))}
+            </div>
+          )}
+
+          {!results.some(r => r.exhaustedAge) && (
+            <div className="rounded-xl p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+              <p className="font-bold text-emerald-700 dark:text-emerald-400">✓ Plan survives all scenarios</p>
+              <p className="text-emerald-600 dark:text-emerald-400 text-[10px] mt-0.5">Portfolio lasts through all stress tests including live-to-95 with low returns.</p>
+            </div>
+          )}
+        </div>
+      )
+    })(),
+
+    // ── Survivor Scenario (Second Death) ─────────────────────────────────────
+    survivor: (() => {
+      if (!spouseEnabled) {
+        return (
+          <div className="text-xs text-gray-500 dark:text-gray-400 py-4 text-center">
+            <p className="mb-2">Enable spouse in the Profile section to use this tool.</p>
+            <p className="text-[10px] text-gray-400">This models the tax impact when the surviving spouse inherits the full RRIF and has stacked income.</p>
+          </div>
+        )
+      }
+
+      const primAge = inputs.currentAge ?? 45
+      const spAge   = sp.currentAge ?? 43
+      const primLife = inputs.lifeExpectancy ?? 90
+      const spLife   = sp.lifeExpectancy ?? 88
+      const prov = inputs.province ?? 'ON'
+
+      // Estimate RRIF balance at first death (primary dies at lifeExpectancy)
+      const rrifBal = (inputs.accounts ?? []).filter(a => a.taxType === 'rrif').reduce((s, a) => s + (a.balance ?? 0), 0)
+      const spRrifBal = (sp.accounts ?? []).filter(a => a.taxType === 'rrif').reduce((s, a) => s + (a.balance ?? 0), 0)
+      const rrifReturn = (inputs.accounts ?? []).find(a => a.taxType === 'rrif')?.returnRate ?? 6
+      const r = rrifReturn / 100
+      const yearsToRetP = Math.max(0, (inputs.retirementAge ?? 65) - primAge)
+
+      // Project primary RRIF to retirement, then draw down 4%/yr through retirement
+      let projP = rrifBal * Math.pow(1 + r, yearsToRetP)
+      for (let y = 0; y < primLife - (inputs.retirementAge ?? 65); y++) {
+        projP = projP * (1 + r) - projP * 0.04
+      }
+      projP = Math.max(0, Math.round(projP))
+
+      // Project spouse RRIF similarly
+      const yearsToRetS = Math.max(0, (sp.retirementAge ?? 63) - spAge)
+      let projS = spRrifBal * Math.pow(1 + r, yearsToRetS)
+      for (let y = 0; y < (sp.lifeExpectancy ?? 88) - (sp.retirementAge ?? 63); y++) {
+        projS = projS * (1 + r) - projS * 0.04
+      }
+      projS = Math.max(0, Math.round(projS))
+
+      // Scenario A: Primary dies first → spouse inherits
+      const combinedRrifA = projP + projS
+      const spCpp = calcCPP({ avgEarnings: sp.cppAvgEarnings ?? 45000, yearsContributed: sp.cppYearsContributed ?? 30, startAge: sp.cppStartAge ?? 65, currentAge: spAge })
+      const spOas = calcOAS({ yearsResident: sp.oasYearsResident ?? 40, startAge: sp.oasStartAge ?? 65, currentAge: spAge })
+      const survivorDrawA = Math.round(combinedRrifA * 0.05) // forced higher RRIF min
+      const taxA = calcTax({ rrif: survivorDrawA, cpp: spCpp, oas: spOas, province: prov })
+
+      // Scenario B: Spouse dies first → primary inherits
+      const primCpp = calcCPP({ avgEarnings: inputs.cppAvgEarnings ?? 0, yearsContributed: inputs.cppYearsContributed ?? 0, startAge: inputs.cppStartAge ?? 65, currentAge: primAge })
+      const primOas = calcOAS({ yearsResident: inputs.oasYearsResident ?? 40, startAge: inputs.oasStartAge ?? 65, currentAge: primAge })
+      const combinedRrifB = projP + projS
+      const survivorDrawB = Math.round(combinedRrifB * 0.05)
+      const taxB = calcTax({ rrif: survivorDrawB, cpp: primCpp, oas: primOas, province: prov })
+
+      const fmtD = n => `$${Math.round(n).toLocaleString()}`
+
+      return (
+        <div className="space-y-3 text-xs">
+          <p className="text-gray-500 dark:text-gray-400">
+            When one spouse dies, the RRIF rolls tax-free — but the survivor now has double the forced withdrawals stacked on their own income.
+          </p>
+
+          {/* Scenario A: Primary dies first */}
+          <div className="rounded-xl p-3 border border-gray-200 dark:border-gray-700 space-y-1.5">
+            <p className="font-semibold text-gray-700 dark:text-gray-300">{inputs.userName || 'Primary'} dies first (age {primLife})</p>
+            <div className="flex justify-between"><span className="text-gray-500">Inherited RRIF</span><span className="font-semibold tabular-nums">{fmtD(projP)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">{sp.name || inputs.spouseName || 'Spouse'}'s own RRIF</span><span className="font-semibold tabular-nums">{fmtD(projS)}</span></div>
+            <div className="flex justify-between border-t border-gray-100 dark:border-gray-800 pt-1"><span className="font-semibold">Combined RRIF</span><span className="font-bold tabular-nums">{fmtD(combinedRrifA)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Est. annual draw (5%)</span><span className="tabular-nums">{fmtD(survivorDrawA)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Tax on draw + CPP + OAS</span><span className="tabular-nums text-red-500">{fmtD(taxA.total)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Effective rate</span><span className="tabular-nums text-red-500">{(taxA.effectiveRate * 100).toFixed(1)}%</span></div>
+            {taxA.oasClawback > 0 && <div className="flex justify-between"><span className="text-amber-600 dark:text-amber-400">⚠ OAS clawback</span><span className="tabular-nums text-amber-600">{fmtD(taxA.oasClawback)}</span></div>}
+          </div>
+
+          {/* Scenario B: Spouse dies first */}
+          <div className="rounded-xl p-3 border border-gray-200 dark:border-gray-700 space-y-1.5">
+            <p className="font-semibold text-gray-700 dark:text-gray-300">{sp.name || inputs.spouseName || 'Spouse'} dies first (age {spLife})</p>
+            <div className="flex justify-between"><span className="text-gray-500">Inherited RRIF</span><span className="font-semibold tabular-nums">{fmtD(projS)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">{inputs.userName || 'Primary'}'s own RRIF</span><span className="font-semibold tabular-nums">{fmtD(projP)}</span></div>
+            <div className="flex justify-between border-t border-gray-100 dark:border-gray-800 pt-1"><span className="font-semibold">Combined RRIF</span><span className="font-bold tabular-nums">{fmtD(combinedRrifB)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Est. annual draw (5%)</span><span className="tabular-nums">{fmtD(survivorDrawB)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Tax on draw + CPP + OAS</span><span className="tabular-nums text-red-500">{fmtD(taxB.total)}</span></div>
+            <div className="flex justify-between"><span className="text-gray-500">Effective rate</span><span className="tabular-nums text-red-500">{(taxB.effectiveRate * 100).toFixed(1)}%</span></div>
+            {taxB.oasClawback > 0 && <div className="flex justify-between"><span className="text-amber-600 dark:text-amber-400">⚠ OAS clawback</span><span className="tabular-nums text-amber-600">{fmtD(taxB.oasClawback)}</span></div>}
+          </div>
+
+          <div className="rounded-xl p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+            <p className="font-semibold text-blue-700 dark:text-blue-400 mb-1">💡 Planning Insight</p>
+            <p className="text-blue-600 dark:text-blue-400">RRSP meltdown before death can reduce the survivor's tax bracket. Consider the RRSP Meltdown tool to optimize pre-death draws.</p>
+          </div>
+
+          <p className="text-[10px] text-gray-400 dark:text-gray-500 italic">
+            Simplified estimate — assumes 4% draw during retirement, 5% survivor draw. Actual RRIF minimums vary by age.
+          </p>
         </div>
       )
     })(),
