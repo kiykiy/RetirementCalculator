@@ -1037,13 +1037,13 @@ export default function App() {
         <button
           onClick={() => setActiveApp('realestate')}
           title="Real Estate"
-          className={`w-9 h-9 rounded-xl flex items-center justify-center text-base transition-all duration-150 shadow-sm
+          className={`w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black tracking-tight transition-all duration-150 shadow-sm
             ${activeApp === 'realestate'
               ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900 shadow-md'
               : 'bg-white dark:bg-gray-800 text-gray-400 dark:text-gray-500 border border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
         >
-          🏠
+          RE
         </button>
 
         {/* Divider before help */}
