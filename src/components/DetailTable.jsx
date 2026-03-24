@@ -107,7 +107,7 @@ function AccountTooltip({ row, type }) {
       balance > 0 && { label: 'Total Cash from Portfolio', value: balance, color: 'text-gray-800 dark:text-gray-200', bold: true },
     ]
     // Add note explaining difference from Gross Income
-    lines._note = 'Total cash withdrawn from all accounts. Differs from Gross Income because TFSA is tax-free and only the taxable portion of Non-Reg counts as income.'
+    lines._note = 'All cash from portfolio. TFSA is tax-free so it\u2019s excluded from Gross Income.'
   } else if (type === 'grossIncome') {
     balance = row.grossIncome ?? 0
     const rrif = row.rrifWithdrawn ?? 0
