@@ -41,7 +41,6 @@ const DEFAULT_INPUTS = {
   estateGoalEnabled: false,
   estateGoal:        0,
   spousalRollover:   false,
-  includeREinNetWorth: false,
   accounts: [
     { id: 'rrif',   name: 'RRSP / RRIF',    balance: 250000, annualContribution: 10500, returnRate: 7,   taxType: 'rrif'   },
     { id: 'tfsa',   name: 'TFSA',           balance: 80000,  annualContribution: 7000,  returnRate: 7,   taxType: 'tfsa'   },

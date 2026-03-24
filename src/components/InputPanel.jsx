@@ -1009,20 +1009,6 @@ export default function InputPanel({ inputs, onChange, onOpenAccounts, rePropert
             RRIF/RRSP transfers to spouse tax-free at death. Defers RRIF tax — affects estate and "Net Estate to Heirs".
           </p>
         </div>
-        <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={inputs.includeREinNetWorth ?? false}
-              onChange={e => set('includeREinNetWorth')(e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-xs text-gray-700 dark:text-gray-300">Include real estate equity in estate</span>
-          </label>
-          <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1.5">
-            Shows projected property equity alongside financial accounts on the Estate tab and portfolio chart. Does not change withdrawal calculations — use the Home Equity tool below to model drawdowns.
-          </p>
-        </div>
       </div>
     ),
 
